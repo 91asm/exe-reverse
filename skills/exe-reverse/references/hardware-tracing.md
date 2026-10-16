@@ -285,29 +285,33 @@ instruction-level trace of a kernel mechanism.
 ## What was measured about hardware breakpoints on the development host
 
 The architectural facts above say the facility exists. Whether an exception raised by a debug register
-reaches a debugger **on a given machine** is a separate question, and this repository ran the
-measurement rather than inferring it. The record is partial, and it is written as partial.
+reaches a debugger **on a given machine** is a separate question, and this repository measured it
+rather than inferring it.
 
 `observed`, on the host described in `evidence/` (a 12th-generation part, with a virtualisation layer
-reporting itself present):
+reporting itself present), with a subject built for the purpose and started under the debugger:
 
 | Step | Result |
 |---|---|
 | activate the debugging privilege on the token | succeeded -- and it was needed: an elevated session alone got `ERROR_ACCESS_DENIED` |
-| start the subject under the debugger | succeeded; 33 debug events, two of them of the exception class |
+| start the subject under the debugger | succeeded |
+| the subject's own breakpoint instruction, placed in its source | **the debugger received it** |
 | write `Dr0` with the address of a function called in a hot loop, and `Dr7` to enable slot 0 | **accepted** -- the context write returned success and the register read back |
-| wait for the exception | **never arrived** |
+| wait for the exception from the debug register | **never arrived** |
 
-**What that combination does and does not establish.** It rules out the two cheapest explanations:
-the register was not rejected, and the address was a live one. What is **not** established is the
-cause, because the control that would separate them did not complete -- a software breakpoint on the
-same function, which would show that this session can receive debug exceptions at all. Without it,
-"the register is intercepted" and "something else in this setup is wrong" remain indistinguishable.
-The honest statement is therefore: the exception did not arrive, on a host with a virtualisation layer
-present, with the cause `unknown`.
+**The third row is what makes the fifth a finding rather than a suspicion.** Three facts hold at once:
+this session can receive a debug exception, the register was accepted, and the exception from the
+register did not arrive. The first rules out a broken harness; the second rules out rejection; what
+remains is that the mechanism's exception is consumed before it reaches the debugger. On a host with a
+virtualisation layer present, that is the expected shape, and it is now a measurement rather than an
+inference from the layer's presence.
 
-**Three implementation errors were made before either fact could be measured**, and they are worth
-listing because each one produced a plausible negative:
+**The control had to be moved into the subject's own source to make this measurable.** The first
+attempt patched a breakpoint byte in from the debugger, which fails for a reason unrelated to
+debugging -- the code section is read-only, so the write is refused and the control never runs. A
+control that cannot run is worse than no control: it leaves a session looking instrumented.
+
+**Three implementation errors came first, and each produced a plausible negative:**
 
 1. a debug-event structure read at the wrong offset -- the union inside it is 8-byte aligned, so the
    exception code sits at 16 rather than 12, and the wrong read yielded zero, which matched no code
@@ -319,8 +323,15 @@ listing because each one produced a plausible negative:
 
 **All three looked like an environment property and all three were arithmetic.** A measurement of
 "does this mechanism work here" has to demonstrate that the mechanism was actually attempted before
-its silence can be read as a property of the machine; otherwise the cheapest bug in the harness gets
+its silence can be read as a fact about the machine; otherwise the cheapest bug in the harness gets
 recorded as a finding about the host.
+
+**What this means for a plan.** On this kind of host, a route that depends on a debug register —
+including a hardware breakpoint used specifically because it leaves no byte changed — cannot be
+assumed to work because the architecture provides it and the API accepts it. The probe's existing
+advice stands and now has evidence behind it: the routes that survive are the ones whose exception is
+not mediated by the layer, and the honest fallback is a software breakpoint, which pays exactly the
+cost the hardware one was chosen to avoid.
 
 ## What this file does not cover
 
