@@ -369,6 +369,27 @@ README overstates its own tool count**, in a table where another README understa
 The record-and-replay debugger has no MCP server of its own: its automation entry point is its own command line,
 and the MCP-side workflow for it rides the debugger's official bridge through a built-in prompt.
 
+## What "agent-native fast analysis" actually is
+
+The phrase names a shape, not a vendor, and the shape is worth stating because this repository already
+implements it without waiting on any product. Three properties, read off the fastest tools on the
+companion platform's side (a SQL interface over the DEX; a whole-app decompiler whose output is verified
+to compile):
+
+1. **Query over a prebuilt index, not a re-run per question.** The expensive pass happens once and its
+   result is a record; every later question is a bounded lookup into that record. Here, that is the
+   snapshot front end's JSONL output — one pass over the artifact builds it — and the folder tool is
+   the query interface: grep, key-slice, capped samples, from a file that already exists.
+2. **Verified output as a design property.** A decompiler that checks its own Java compiles; here, the
+   equal-as-used sibling: a reducer that emits the solver text and, on `unsat`, returns *proved*, with
+   the certificate in the run — not "agreed on the samples I tried".
+3. **Whole-artifact speed.** Seconds for the full file, so the first move is always "index everything",
+   never "sample carefully because indexing is expensive".
+
+The consequence for planning: speed for the agent is a property of the record discipline, and none of
+the three properties above is gated on a tool this host lacks. A named product that fits this shape and
+runs on this platform is a convenience; the shape itself is already the default route.
+
 ## Intel Processor Trace on Windows: the verdict
 
 **There is no first-party, documented, user-mode path to capture Intel PT on Windows.** All three parts of that

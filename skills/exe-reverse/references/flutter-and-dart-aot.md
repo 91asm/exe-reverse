@@ -297,12 +297,15 @@ file".
 **The other side of the same product.** When the same application ships an Android build, that build
 belongs to the companion skill for its platform, not to this one: `apk-reverse`, when it is installed
 in the same environment, reads the APK side -- its smali, its DEX, its own runtime -- and this skill
-reads the Windows side. The measurement above is exactly why that boundary is drawn at the container
-and not at the language: the tooling does not cross, so neither skill should reach into the other's
-file format. **What does cross is the finding, not the tool**: a gate function located here names what
-to look for in the Android build of the same feature -- same product, same tier, a different container
--- and a mechanism located there narrows what to expect here. Hand over the located addresses, the
-mechanism's shape and the verdict, and let the skill that owns the container choose its own tools.
+reads the Windows side. The same goes for the agent-native fast tools written for that container: a
+SQL interface over the DEX and a whole-app Java decompiler with verified output both exist, both are
+fast, and both read formats this skill never meets. The measurement above is exactly why that
+boundary is drawn at the container and not at the language: the tooling does not cross, so neither
+skill should reach into the other's file format. **What does cross is the finding, not the tool**: a
+gate function located here names what to look for in the Android build of the same feature -- same
+product, same tier, a different container -- and a mechanism located there narrows what to expect
+here. Hand over the located addresses, the mechanism's shape and the verdict, and let the skill that
+owns the container choose its own tools.
 
 ## Reaching the code at run time, which needs a different address convention
 
