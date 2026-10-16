@@ -476,7 +476,12 @@ def host_in_use():
     machine someone else was using, and no part of the kit had thought to check.
 
     Standard library only: the foreground window and the screen metrics come from the platform's own
-    interface, and a maximised window covering the whole screen is the cheap signal for "in use".
+    interface. A borderless window covering the screen is the interference case this check exists
+    for. A merely maximised window is NOT: on this platform the operator routinely drives the agent
+    through a maximised browser, so a rule that reads "maximised" as "owns the display" fires on the
+    operator reading the agent's own output -- which it did, every round, for many rounds, and the
+    interference it warned about never existed. The distinction is one flag: maximised windows keep
+    their caption and their taskbar; full-screen ones are borderless.
     """
     if os.name != 'nt':
         return {'in_use': None, 'detail': 'not checked on this platform'}
@@ -492,12 +497,20 @@ def host_in_use():
         left, top, right, bottom = struct.unpack('<4i', rect.raw)
         sw = user32.GetSystemMetrics(0)
         sh = user32.GetSystemMetrics(1)
-        fullscreen = (right - left) >= sw and (bottom - top) >= sh
+        covers = (right - left) >= sw and (bottom - top) >= sh
+        maximised = bool(user32.IsZoomed(hwnd))
+        style = user32.GetWindowLongA(hwnd, -16)
+        popup = bool(style & 0x80000000)
+        fullscreen = covers and popup and not maximised
         # The title is the operator's, not ours: report that there is one, never what it says.
-        return {'in_use': bool(fullscreen),
-                'detail': ('a full-screen window owns the display' if fullscreen
-                           else 'the foreground window is not full-screen'),
-                'screen': '%dx%d' % (sw, sh)}
+        if fullscreen:
+            detail = 'a borderless full-screen window owns the display'
+        elif covers and maximised:
+            detail = ('the foreground window is maximised, not full-screen '
+                      '(an operator reading a maximised agent window is not interference)')
+        else:
+            detail = 'the foreground window is not full-screen'
+        return {'in_use': bool(fullscreen), 'detail': detail, 'screen': '%dx%d' % (sw, sh)}
     except (OSError, AttributeError) as exc:
         return {'in_use': None, 'detail': 'could not be determined: %s' % exc}
 
@@ -517,6 +530,36 @@ def check_host_use():
         return [Check('host', True, 'host use not determined (%s)' % state['detail'],
                       severity='note')]
     return [Check('host', True, 'no full-screen window is in the foreground', severity='note')]
+
+
+def check_disk_room(route):
+    """A nearly-full volume is a host fact that poisons every dynamic route, quietly.
+
+    Measured on this codebase's own target: with the system volume at zero bytes free, the
+    injection layer could not write its agent (attach fails with "no space left on device"),
+    the target crashed writing its session data, and a test run produced two hundred errors
+    that looked like code failures and were tmpdir creation failures. A warn, not a stop:
+    free space or move the work to a roomier volume, then run.
+    """
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage(os.path.dirname(os.path.abspath('.')) or '.')
+        free_gb = free / (1024 ** 3)
+    except (OSError, ValueError) as exc:
+        return [Check('disk', True, 'free space not determined (%s)' % exc, severity='note')]
+    floor_gb = 2.0
+    if route == 'static':
+        floor_gb = 0.5
+    if free_gb < floor_gb:
+        return [Check('disk', False,
+                      '%.2f GB free on the working volume; a %s route wants at least %.1f GB'
+                      % (free_gb, route, floor_gb),
+                      severity='warn',
+                      fix='free space or move the working directory to a roomier volume before '
+                          'the dynamic part. A full volume does not refuse to start: the target '
+                          'launches, then dies mid-run where it first writes -- and the crash '
+                          'looks like the target\'s bug, not the disk\'s')]
+    return [Check('disk', True, '%.2f GB free on the working volume' % free_gb, severity='note')]
 
 
 def check_interference(probe):
@@ -643,6 +686,7 @@ def main():
     checks.extend(check_destination(args.out, args.route, args.sample))
     checks.extend(check_requirements(args.route, probe))
     checks.extend(check_host_use())
+    checks.extend(check_disk_room(args.route))
     checks.extend(check_interference(probe))
 
     blocks = [c for c in checks if not c.ok and c.severity == 'block']
