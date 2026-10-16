@@ -1157,6 +1157,11 @@ SCRIPT_CAPABILITIES = {
     'scan_leaks.py': ['identity_scan'],
     'capabilities.py': ['host_capability_probe'],
     'doctor.py': ['host_capability_probe'],
+    # Not a Python script, but it belongs to a capability all the same: it instruments a live
+    # process to decide whether a located branch is the branch that decides. Left out of the table,
+    # the doctor counts it in the denominator and reports it unclassified -- which is the check
+    # working, and it is cheaper to answer than to silence.
+    'gate_probe.js': ['runtime_instrumentation'],
 }
 
 
