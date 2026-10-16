@@ -36,6 +36,27 @@ Usage
     python preflight.py --sample target.exe --out work --route trace
     python preflight.py --sample target.exe --out work --route kernel --json
     python preflight.py --sample target.exe --list-routes
+    python preflight.py --space                      # every volume, and where a big route fits
+    python preflight.py --cleanup E:\\exerev-work    # what a session left behind
+    python preflight.py --cleanup E:\\exerev-work --yes   # remove exactly that
+
+SPACE AND CLEANUP
+-----------------
+A route is not a plan until there is somewhere to put its output. The routes here differ by three
+orders of magnitude in what they produce, and the largest ones fail in a way that is easy to
+misread: a recording or a capture truncated by a full disk looks like a short one, and the result
+gets interpreted rather than questioned.
+
+So the space question is answered with a destination attached. When the chosen directory cannot
+hold the route, the report names the volumes that can and gives the exact `--out` that fixes it,
+because a check that says "not enough room here" without saying where there *is* room has turned a
+one-flag correction into a dead end.
+
+Every directory this script creates carries a manifest naming it as a session directory. That is
+what makes cleanup safe: `--cleanup` considers only directories carrying the manifest, reports what
+they occupy and what is large inside them, and deletes nothing until `--yes` is passed. A mistyped
+path therefore cannot become a deleted document folder, which is the only acceptable behaviour for
+a tool that removes things.
 
 Exit codes: 0 = ready, 1 = ready with warnings, 3 = not ready, 2 = usage error.
 The last line is `RESULT=<token>`.
@@ -118,6 +139,159 @@ def run(cmd, timeout=20):
         return -1, str(exc)
 
 
+def volumes():
+    """Every mounted volume with its free and total bytes, largest free space first.
+
+    A route that needs sixteen gigabytes does not care which letter it lives on, and a check that
+    reports "not enough room here" without naming where there *is* room turns a one-flag fix into a
+    dead end. Standard library only: `os.listdrives` exists on newer interpreters, and the logical
+    drive mask covers the rest without pulling in a dependency.
+    """
+    out = []
+    drives = []
+    if hasattr(os, 'listdrives'):
+        try:
+            drives = list(os.listdrives())
+        except OSError:
+            drives = []
+    if not drives and os.name == 'nt':
+        try:
+            import ctypes
+            mask = ctypes.windll.kernel32.GetLogicalDrives()
+            drives = ['%s:\\' % chr(ord('A') + i) for i in range(26) if mask & (1 << i)]
+        except (OSError, AttributeError):
+            drives = []
+    if not drives:
+        drives = [os.path.abspath(os.sep)]
+    for d in drives:
+        try:
+            usage = shutil.disk_usage(d)
+        except OSError:
+            continue                       # an empty optical drive, a disconnected share
+        out.append((d, usage.free, usage.total))
+    return sorted(out, key=lambda row: -row[1])
+
+
+def gb(n):
+    """Human-readable size. A megabyte reported as "0.0 GB" reads as nothing, which is exactly the
+    wrong signal for an artefact someone is deciding whether to keep."""
+    if n < 2 ** 20:
+        return '%d KB' % (n / 1024)
+    if n < 2 ** 30:
+        return '%.1f MB' % (n / 2 ** 20)
+    return '%.1f GB' % (n / 2 ** 30)
+
+
+def volume_report(minimum_free=0):
+    """A compact line per volume, and the best candidate for a large artefact."""
+    vols = [v for v in volumes() if v[1] >= minimum_free] if minimum_free else volumes()
+    if not vols:
+        return [], None
+    lines = ['%s %s free of %s' % (m, gb(free), gb(total)) for m, free, total in vols]
+    return lines, vols[0]
+
+
+# ---------------------------------------------------------------------------
+# Cleanup. A route that needs sixteen gigabytes leaves something behind, and a
+# work directory that nobody dares delete is a work directory that grows forever.
+# The rule: this script deletes only a directory that carries its own manifest,
+# so a mistyped path cannot become a deleted document folder.
+# ---------------------------------------------------------------------------
+MANIFEST = '.exerev-session.json'
+
+# Artefacts this kit's routes produce that are large and disposable. Matched on suffix because the
+# names come from the tools, not from here.
+LARGE_SUFFIXES = ('.dmp', '.mdmp', '.etl', '.run', '.raw', '.trace', '.blob')
+
+
+def write_manifest(out_dir, route, sample=None):
+    """Leave a note in a directory saying who created it, and for what.
+
+    Written on creation so that cleanup has something to verify. Without it, a cleanup pass is
+    guessing which directories are its own, and guessing is how a tool deletes something it did not
+    make.
+    """
+    import time
+    path = os.path.join(out_dir, MANIFEST)
+    if os.path.exists(path):
+        return path
+    doc = {'created_by': 'exe-reverse preflight', 'created_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+           'route': route, 'sample': os.path.abspath(sample) if sample else None,
+           'note': 'This directory was created for one analysis session. Removing it removes that '
+                   'session\'s artefacts. `preflight.py --cleanup <dir>` will only ever remove '
+                   'directories carrying this file.'}
+    try:
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(doc, fh, indent=2)
+    except OSError:
+        return None
+    return path
+
+
+def _tree_size(path):
+    total = 0
+    largest = []
+    for dirpath, dirnames, files in os.walk(path):
+        dirnames[:] = [d for d in dirnames if d != '__pycache__']
+        for f in files:
+            p = os.path.join(dirpath, f)
+            try:
+                size = os.path.getsize(p)
+            except OSError:
+                continue
+            total += size
+            if f.lower().endswith(LARGE_SUFFIXES):
+                largest.append((size, p))
+    largest.sort(reverse=True)
+    return total, largest
+
+
+def cleanup_scan(roots):
+    """Every manifest-carrying directory under the given roots, with what it occupies."""
+    found = []
+    for root in roots:
+        root = os.path.abspath(root)
+        if os.path.isfile(os.path.join(root, MANIFEST)):
+            candidates = [root]
+        elif os.path.isdir(root):
+            candidates = []
+            for dirpath, dirnames, files in os.walk(root):
+                if MANIFEST in files:
+                    candidates.append(dirpath)
+                    dirnames[:] = []          # do not descend into a session we already found
+        else:
+            continue
+        for d in candidates:
+            try:
+                with open(os.path.join(d, MANIFEST), encoding='utf-8') as fh:
+                    doc = json.load(fh)
+            except (OSError, ValueError):
+                doc = {'note': 'manifest unreadable'}
+            total, largest = _tree_size(d)
+            found.append({'dir': d, 'bytes': total, 'manifest': doc,
+                          'largest': [{'bytes': b, 'path': p} for b, p in largest[:8]]})
+    return found
+
+
+def cleanup_run(rows, confirm):
+    """Remove what the scan found. Refuses anything that is not one of ours."""
+    freed = 0
+    removed = []
+    for row in rows:
+        d = row['dir']
+        if not os.path.isfile(os.path.join(d, MANIFEST)):
+            continue                          # re-verified immediately before the delete
+        if not confirm:
+            continue
+        try:
+            shutil.rmtree(d)
+            freed += row['bytes']
+            removed.append(d)
+        except OSError:
+            continue
+    return freed, removed
+
+
 def sha256_of(path, chunk=1 << 20):
     h = hashlib.sha256()
     with open(path, 'rb') as fh:
@@ -181,7 +355,7 @@ def check_sample(path, out_dir):
     return checks
 
 
-def check_destination(out_dir, route):
+def check_destination(out_dir, route, sample=None):
     checks = []
     if not out_dir:
         return checks
@@ -201,6 +375,9 @@ def check_destination(out_dir, route):
             checks.append(Check('destination', False, 'could not create %s: %s' % (abs_out, exc),
                                 fix='choose a path you can write to'))
             return checks
+    # A manifest on creation is what makes the directory safely removable later.
+    if os.path.isdir(abs_out) and os.access(abs_out, os.W_OK):
+        write_manifest(abs_out, route, sample)
     if not os.access(abs_out, os.W_OK):
         checks.append(Check('destination', False, '%s is not writable' % abs_out,
                             fix='choose a writable path'))
@@ -209,17 +386,29 @@ def check_destination(out_dir, route):
     try:
         usage = shutil.disk_usage(abs_out)
         need = spec['needs_free_bytes']
+        here = os.path.splitdrive(abs_out)[0]
         if usage.free < need:
+            # Name somewhere that *does* have room. A refusal without an alternative is the check
+            # being unhelpful about the one thing it knows and the caller does not.
+            roomier = [(m, f) for m, f, _t in volumes()
+                       if m.rstrip('\\/').lower() != here.rstrip('\\/').lower() and f >= need]
+            fix = ('free space, choose a cheaper route, or write to a volume that has room. A '
+                   'recording truncated by a full disk looks exactly like a short one, which is '
+                   'why this is checked before it starts.')
+            if roomier:
+                fix += (' Volumes with enough free space: %s. Re-run with --out %s and nothing '
+                        'else has to change.'
+                        % (', '.join('%s (%s free)' % (m, gb(f)) for m, f in roomier),
+                           os.path.join(roomier[0][0], 'exerev-work')))
             checks.append(Check('destination', False,
-                                'route "%s" needs about %.1f GB free; %.1f GB available'
-                                % (route, need / 2**30, usage.free / 2**30),
-                                fix='free space, choose another destination, or pick a cheaper '
-                                    'route. A recording truncated by a full disk looks like a '
-                                    'short one'))
+                                'route "%s" needs about %s; %s free on %s'
+                                % (route, gb(need), gb(usage.free), here or 'this volume'),
+                                fix=fix))
         else:
             checks.append(Check('destination', True,
-                                'route "%s" needs about %.1f GB; %.1f GB free (%s)'
-                                % (route, need / 2**30, usage.free / 2**30, spec['basis']),
+                                'route "%s" needs about %s; %s free on %s (cost basis: %s)'
+                                % (route, gb(need), gb(usage.free), here or 'this volume',
+                                   spec['basis']),
                                 severity='note'))
     except OSError as exc:
         checks.append(Check('destination', True, 'free space unreadable: %s' % exc,
@@ -310,6 +499,15 @@ def main():
     ap.add_argument('--route', default='static', choices=sorted(ROUTES),
                     help='the route you intend to take (default: static)')
     ap.add_argument('--list-routes', action='store_true', help='what each route costs and needs')
+    ap.add_argument('--space', action='store_true',
+                    help='every mounted volume and how much room it has')
+    ap.add_argument('--cleanup', nargs='*', metavar='ROOT',
+                    help='find session directories created by this script under ROOT (default: the '
+                         'working directory and the system temp directory) and report what they '
+                         'occupy. Nothing is deleted without --yes, and only directories carrying '
+                         'this script\'s own manifest are ever considered')
+    ap.add_argument('--yes', action='store_true',
+                    help='with --cleanup: actually delete, instead of reporting')
     ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
 
@@ -323,6 +521,57 @@ def main():
         print('\nRESULT=%s' % TOKENS['ready'])
         return EXIT_OK
 
+    if args.space:
+        vols = volumes()
+        if not vols:
+            sys.stderr.write('error: no volume could be measured\n')
+            print('RESULT=%s' % TOKENS['use'])
+            return EXIT_USE
+        print('volumes, largest free space first:')
+        for m, free, total in vols:
+            print('  %-8s %s free of %s' % (m, gb(free), gb(total)))
+        need = ROUTES[args.route]['needs_free_bytes']
+        ok = [v for v in vols if v[1] >= need]
+        print('\n  route "%s" needs about %s' % (args.route, gb(need)))
+        if ok:
+            print('  write it to %s' % os.path.join(ok[0][0], 'exerev-work'))
+        else:
+            print('  no volume here has room for that route; pick a cheaper one with '
+                  '--list-routes')
+        print('RESULT=%s' % TOKENS['ready'])
+        return EXIT_OK
+
+    if args.cleanup is not None:
+        import tempfile
+        roots = args.cleanup or [os.getcwd(), tempfile.gettempdir()]
+        rows = cleanup_scan(roots)
+        if args.json:
+            print(json.dumps({'roots': roots, 'found': rows,
+                              'total_bytes': sum(r['bytes'] for r in rows),
+                              'deleted': bool(args.yes)}, indent=2))
+        if not rows:
+            print('nothing to clean under: %s' % ', '.join(roots))
+            print('  only directories carrying %s are ever considered' % MANIFEST)
+            print('RESULT=%s' % TOKENS['ready'])
+            return EXIT_OK
+        total = sum(r['bytes'] for r in rows)
+        if not args.json:
+            print('session directories this script created:')
+            for r in rows:
+                when = r['manifest'].get('created_at', 'unknown')
+                route = r['manifest'].get('route', 'unknown')
+                print('  %-58s %8s  route %s, created %s' % (r['dir'], gb(r['bytes']), route, when))
+                for big in r['largest'][:3]:
+                    print('        %8s  %s' % (gb(big['bytes']), os.path.basename(big['path'])))
+            print('\n  %d director(y|ies), %s reclaimable' % (len(rows), gb(total)))
+        if args.yes:
+            freed, removed = cleanup_run(rows, confirm=True)
+            print('  removed %d director(y|ies), freed %s' % (len(removed), gb(freed)))
+        else:
+            print('  nothing was deleted. Re-run with --yes to remove exactly these directories.')
+        print('RESULT=%s' % TOKENS['ready'])
+        return EXIT_OK
+
     if not args.sample and not args.out:
         sys.stderr.write('error: give --sample, --out, or both\n')
         print('RESULT=%s' % TOKENS['use'])
@@ -333,7 +582,7 @@ def main():
 
     checks = []
     checks.extend(check_sample(args.sample, args.out))
-    checks.extend(check_destination(args.out, args.route))
+    checks.extend(check_destination(args.out, args.route, args.sample))
     checks.extend(check_requirements(args.route, probe))
     checks.extend(check_interference(probe))
 

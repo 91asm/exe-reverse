@@ -19,6 +19,25 @@ everything builds, loads, runs, and does the wrong thing.
 This file is a procedure with gates, not background reading. It is long enough that its middle gets
 skimmed, so the five moves come first and everything below explains them.
 
+## If you arrive with a wish rather than a file
+
+Most sessions start with an aim, not an artifact: "get the paid feature", "this is packed and I want
+to know what it does", "recover the licence algorithm". Walk that in directly:
+
+```
+python scripts/plan.py --list                     # the intents this kit knows
+python scripts/plan.py unlock-tier                # what it needs, what this host has, first steps
+python scripts/plan.py --from-sample target.exe   # read the headers, then the same plan
+python scripts/plan.py --from-sample app.so       # an ELF payload is read as what it usually is
+```
+
+`plan.py` is deterministic rather than generated: an intent maps to capabilities, the capabilities
+resolve against this host, and every gap comes back with the command that closes it. Each plan opens
+with the questions that decide whether the wish is **well-posed** -- whether a tier is decided
+locally at all, whether the deliverable is a patch or a generator -- because those are cheaper to
+answer than the work they redirect. Use it before a target is touched, not after the route turns out
+to be closed.
+
 ## Immediate — five moves before you touch the target
 
 **1. Say what must exist at the end, as a sentence someone else could test.** "It works" is not a
