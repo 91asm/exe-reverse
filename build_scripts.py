@@ -32,9 +32,9 @@ Exit codes: 0 = clean, 2 = findings reported (audit mode), 1 = usage or IO error
 
 NOTES
 -----
-  * A finding is a heuristic, not a verdict: a path written as a documented placeholder
-    (`C:\Users\<user>\...`) or as an environment reference (`%WINDIR%\System32`) is a form,
-    not this machine's layout, and is deliberately NOT reported; a literal profile path is.
+  * A finding is a heuristic, not a verdict: a path carrying a documented placeholder (an
+    account name in angle brackets) or an environment reference is a form rather than one
+    machine's layout, and is deliberately NOT reported; a literal profile path is.
   * --scrub rewrites `'<abs path>'` literals into `''`, which keeps the file
     syntactically valid but leaves the decision (and the fix) to a human. It never
     runs unless --apply is also given.

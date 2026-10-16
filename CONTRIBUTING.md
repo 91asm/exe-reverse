@@ -33,12 +33,13 @@ parts a script can see, and says nothing about the rest.
 
 ## Local setup
 
-Python 3.9 or newer is the only requirement to run anything here. The skill's scripts import nothing
-outside the standard library; everything else is optional and each consumer states what it uses.
+The interpreter is the only requirement to run anything here, at the minimum version the skill
+declares (3.9 or newer). The skill's scripts import nothing outside the standard library; everything
+else is optional and each consumer states what it uses.
 
 | Dependency | Needed for | Notes |
 |---|---|---|
-| Python 3.9+ | every script and every gate | `skills/exe-reverse/SKILL.md` declares 3.9+; `mypy.ini` type-checks against 3.9 |
+| The interpreter, 3.9 or newer | every script and every gate | `skills/exe-reverse/SKILL.md` declares the floor as 3.9+; `mypy.ini` type-checks against 3.9 |
 | `pytest` | the regression suite (`tests/`, declared in `pytest.ini`) | markers `unit`, `cli`, `integration` are declared, and `--strict-markers` is on |
 | `PyYAML` | parsing `SKILL.md` frontmatter the way the installer's YAML parser will | `check_repo.py` falls back to a colon test and prints a `WARN` when it is absent |
 | `tiktoken` | measuring the always-loaded body against the real tokenizer | without it `check_budget.py` uses a calibrated `characters / 4.285` fallback; CI installs it |
@@ -85,25 +86,37 @@ python -m pytest -q          # the regression suite
 ```
 
 What each one returned at the revision this document was written against, stated so you can tell a
-pre-existing condition from a regression you caused:
+pre-existing condition from a regression you caused. This tree is under active construction, so
+these lines are a snapshot rather than a stable baseline: re-run them, and record the failing lines
+before your change so you can show you did not cause them.
 
 | Gate | Observed output | Exit |
 |---|---|---|
-| `check_routing.py` | `symptom index : SKILL.md 33 rows / routing mirror 33 rows`; `== routing: coherent ==`; `RESULT=ok` | 0 |
+| `check_routing.py` | `symptom index : SKILL.md 33 rows / routing mirror 33 rows`; `reference table: 33 rows, covering 33 reference files`; `script table : 9 rows, covering 9 scripts`; `== routing: coherent ==`; `RESULT=ok` | 0 |
 | `check_refs.py` | `== section references: 29 reachable ==`; `== result: 0 dangling, 0 warning(s) ==` | 0 |
-| `check_budget.py` | `ok SKILL.md 296 lines (...), ~5549 tokens (tiktoken/cl100k_base; soft 13000)`; `== budget: 0 failure(s), 0 warning(s), 4 note(s) ==` | 0 |
-| `check_commands.py` | no drift; the summary reports commands checked, skipped (workbench, external, quoted, unverifiable) and the boundary of the check | 0 |
-| `check_repo.py` | `MISSING` rows for references and scripts the entry point names that had not been written yet, and `SKIP git ls-files unavailable (not a checkout?)` outside a git checkout | 1 |
-| `python -m pytest -q` | `no tests ran in 0.02s` | 5 |
-| `build_scripts.py` | `== audit: 7 file(s) checked, 0 finding(s). Nothing was written.` | 0 |
+| `check_budget.py` | `ok SKILL.md 296 lines (34 index = 11% of the file, and it is still loaded: ...), ~5552 tokens (tiktoken/cl100k_base; soft 13000)`; `== budget: 0 failure(s), 0 warning(s), 4 note(s) ==` | 0 |
+| `check_commands.py` | `commands : 30 checked (30 clean, 0 drift, 0 warning)` against 7 script interfaces; `RESULT=commands_ok` | 0 |
+| `check_repo.py` | every referenced path resolves and the README's paths are explicit; the leak step then reports strong findings on the tracked surface and crashes while printing them (`UnicodeEncodeError: 'gbk' codec can't encode character ... in check_leaks()`, because this host's console code page cannot encode the replacement character the scanner's decoded output contains) | 1 |
+| `python -m pytest -q` | red while the suite was still being written: `no tests ran in 0.02s` and exit 5 against an empty tree, then `1 failed, 49 passed, 70 errors`, then `2 failed, 211 passed`, then `4 failed, 245 passed` | 1 |
+| `build_scripts.py` | `== audit: 7 file(s) checked, 0 finding(s). Nothing was written.` in one run; an edit to the tool's own docstring then left the module unparseable (`SyntaxError: (unicode error) ... truncated \UXXXXXXXX escape`), so it does not run at all | 0, 2 on findings, 1 on usage |
+| `scan_leaks.py` | `5 strong, 0 weak, 3 suppressed` in the skill tree, with `RESULT=findings`; the strong hits include shapes the desensitization reference predicts as false positives (a product-shaped name bound to a version, a dotted-quad version string read as an address) | 1 |
 
-Two of those need their cause named rather than their number. `check_repo.py` fails while the
-reference library is incomplete: it resolves every `references/<name>.md` and `scripts/<name>.py`
-mention in the entry point, the README and the references, so a row written ahead of its file is a
-failure, and so is an entry-point pointer to a file that has not landed. `pytest` exit 5 is the "no
-tests collected" code, which is what an empty `tests/` tree looks like; it is not a harness failure.
-When you add a gate, fix the numbers above in the same pull request, because an observed output that
-is stale is worse than no output.
+Three of those need their cause named rather than their number. An earlier `check_repo.py` run failed
+with `MISSING` rows while the reference library was still incomplete, because it resolves every
+`references/<name>.md` and `scripts/<name>.py` mention in the entry point, the README and the
+references: a row written ahead of its file is a failure, and so is an entry-point pointer to a file
+that has not landed. Its current failure is the identity step, and its crash there is a defect in the
+gate's own reporting path rather than in the finding, which is genuine. `pytest` is red at this
+revision, and its counts moved several times while the suite was being written, which is exactly why
+recording the failing lines before your change matters. And the root tools are
+parsed by nothing: `check_repo.py` parses and runs only `skills/*/scripts/*.py`, so a syntax error in
+a root-level tool passes every gate and surfaces only under `mypy`/`flake8` or when someone runs it.
+Run the lint pair.
+
+The tree is under active construction, and the numbers above moved while this document was being
+written: the reference library filled in, `tests/` appeared, and the tree became a git checkout,
+which is why the leak step now runs instead of reporting that `git ls-files` was unavailable. Treat
+every line as an example of the shape to expect and re-run the gate rather than trusting the count.
 
 `build_scripts.py` is not a gate. It is the publish-side audit and sync tool: audit is the default
 and writes nothing, `--apply` copies, `--scrub` neutralises absolute-path literals in the copies, and
@@ -208,8 +221,9 @@ Length follows content; 100 to 300 lines is typical, and loadable is better than
    one machine, and credential-shaped constants. Generic install locations and already-redacted
    paths carrying a `<placeholder>` are exempt; a real workbench path is a finding, and the fix is in
    the file rather than in the exemption list.
-7. Everything is plain Python 3.9+: no third-party import outside a `try`/`except` with a stated
-   fallback, since `mypy` is configured against 3.9 and the gates run on a bare interpreter.
+7. Everything targets the interpreter at the declared minimum version: no third-party import outside
+   a `try`/`except` with a stated fallback, since `mypy` is configured against 3.9 and the gates run
+   on a bare interpreter.
 
 **Recipe:**
 
@@ -297,23 +311,39 @@ could not exercise.
 
 ### A capability row with its grade
 
-**Purpose:** the machine-readable companion to `references/evidence-summary.md`: one row per
-capability carrying the conclusion, its strength grade, and the evidence a reader can reproduce. The
-companions live under `skills/exe-reverse/evidence/`.
+**Purpose:** the machine-readable companion to the evidence summary:
+`skills/exe-reverse/evidence/capability-matrix.json`. It holds one row per capability this skill
+claims, so that a reader who has the installed skill but not this repository can check every claim
+against the command the row names. The siblings in the same directory carry the tool versions and the
+installer-facing limit list.
 
 **Mechanical constraints:**
 
-1. The file must be valid JSON. No gate parses it, and no gate resolves the evidence paths inside it,
-   so the row's honesty is a reviewer's check rather than a script's.
-2. The grade must match the grade the same capability carries in `references/evidence-summary.md` and
-   in `references/coverage-and-limits.md`. A row that says `observed` must name the command and where
-   its output is recorded; a tool's exit code is a statement about the tool, not about a target.
-3. The command in a row is a command someone will run. Write one that exists, and prefer a form that
-   is already validated elsewhere in the documentation.
+1. The file must be valid JSON. No gate parses it and no gate resolves the evidence paths inside it,
+   so the honesty of a row is a reviewer's check rather than a script's.
+2. The file is organised around its own vocabulary, not around prose: a `grade_legend` that defines
+   the three grades, `rules_applied` that states the chain rule and the unknown rule, a
+   `measurement_host` and a `measurement_window` that pin when the rows were produced, `script_pins`
+   that record each shipped script's size and a truncated digest, and `tree_state_at_end_of_window`.
+   A new row lands under `rows` and inherits all of that; if your measurement was taken outside the
+   recorded window, or after the pinned scripts changed, the window or the pins move in the same
+   change, because a row whose pins do not match the tree is not reproducible.
+3. A row carries `id`, `capability`, `grade`, `grade_not_higher` (why the grade is not a level
+   higher), `evidence`, `dependency_not_shipped`, `raise_grade` and `evidence_file_pointers`. The
+   `evidence` entries name a script and a command, with the observed result as text; `raise_grade`
+   states the measurement that would move the row. A row that says `observed` and names no command is
+   incomplete.
+4. The grade must agree with `references/evidence-summary.md` and with
+   `references/coverage-and-limits.md` for the same capability. A tool's exit code is a statement
+   about the tool, not about a target the tool was pointed at.
+5. The matrix's own path convention is worth copying: where a real path would carry a user profile
+   name, the entry uses a token such as `%TEMP%` and says so, rather than reproducing the literal
+   path to be concrete.
 
-**Recipe:** add the row with the capability, the conclusion, the grade and the reproducible evidence;
-move the matching line in `references/evidence-summary.md` in the same pass; if the row changes what
-this repository covers, update the coverage table as described below.
+**Recipe:** append a row to `rows` with the fields above; keep `raise_grade` and
+`dependency_not_shipped` honest even when both are inconvenient; move the matching line in
+`references/evidence-summary.md` in the same pass; if the row changes what this repository covers,
+update the coverage table as described below.
 
 ## Adding a whole new capability
 
@@ -379,6 +409,21 @@ reimplementing it, and runs it over the output of `git ls-files`, so git-ignored
 produce a finding; where git is unavailable, the leak step prints `SKIP`. A scanner error is reported
 as a note, not as a leak.
 
+Three details of the scan surface decide what a clean result means. The default root is the tree two
+levels above the script, which is the skills directory, so the first command above does not scan the
+repository root; pass `--root .` for that, and expect it to walk untracked workbench material, which
+is why the gate passes an explicit tracked-file list through `--files-from` instead. `--only` and
+`--skip` narrow the categories, and `--fail-on any` makes weak findings fatal. And the scan's own
+header line states the root and the file count: read it before believing a result, because a scan
+pointed at the wrong tree reports nothing and looks identical to a clean one.
+
+One false-positive class is already on this tree and is worth recognising rather than fighting one hit
+at a time: a language or runtime name followed by a version number satisfies the product-name rule,
+and the entry point's own compatibility line is one such hit. That is a rule to narrow, argued with
+the reason beside it, not a value to redact, because redacting it removes a fact a reader needs. Do
+not widen the exemption list per hit, and do not reword a document purely to silence a rule that is
+wrong.
+
 **Must be removed:** product and vendor identity, the version resource strings embedded in an image,
 licence and activation material, real endpoints, customer and organisation identifiers, personal and
 machine identifiers including an absolute path under a user profile, target-derived file names,
@@ -416,8 +461,9 @@ carries its reason next to it:
 5. **Build and bytecode output**: objects, libraries, classes, archives, and `__pycache__`.
 6. **Local scratch**: `_tmp/`, `out/`, `work/`, `audit_out/`, `exports/`, `samples/`, `captures/`,
    logs.
-7. **The workbench**: `tools/` and the third-party write-ups under `.ref/` and `_recon/`. Both are
-   someone else's material or a locally cloned toolchain, and one `git add -A` is all it would take.
+7. **The workbench**: `tools/` for a locally cloned or extracted toolchain, and whatever directory a
+   research pass uses for third-party write-ups. These are someone else's material or a local build,
+   and one `git add -A` is all it would take to commit them.
 8. **Sandbox install directories** created while testing the `skills` CLI against the repository.
 9. **Screenshots.** An image is evidence while a task runs and never part of the tree; the text of
    what it showed belongs in the record instead.

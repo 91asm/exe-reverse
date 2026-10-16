@@ -24,7 +24,7 @@
     "how_observed": "python --version produced 'Python 3.14.0'; the host probe independently reported \"python\": \"3.14.0\"",
     "needed_by_skill": "needed",
     "used_by": "every script in skills/exe-reverse/scripts/",
-    "note": "Other interpreters resolve on PATH on this host (3.11 and 3.13 under a user profile, a Microsoft Store shim, and one shipped with LibreOffice). The scripts are invoked as `python`, so which interpreter runs depends on PATH order. Python 3.9 or later is the stated floor; only 3.14.0 was exercised here."
+    "note": "Other interpreters resolve on PATH on this host (3.11 and 3.13 under a user profile, a Microsoft Store shim, and one shipped with an office suite). The scripts are invoked as `python`, so which interpreter runs depends on PATH order. The stated floor is 3.9 or later; only 3.14.0 was exercised here."
   },
   "python_packages": [
     {"name": "pefile", "version_observed_here": "2024.8.26", "how_observed": "python -c \"import importlib.metadata as md; print(md.version('pefile'))\"", "needed_by_skill": "beneficial", "used_by": "third-party alternative to the shipped reader", "note": "Importable. The shipped reader exists so that the skill does not depend on this; it is useful only as a second opinion when two readers disagree about one field."},

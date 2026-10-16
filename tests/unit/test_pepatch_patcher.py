@@ -333,9 +333,16 @@ def test_no_checksum_leaves_the_declared_field_stale(load_script, pillow, monkey
     assert peutil.PE(out.read_bytes(), None).checksum_ok() is False
 
 
-def test_allow_resize_overwrites_in_place_without_shifting(load_script, pillow, fixtures,
-                                                            monkeypatch, capsys):
-    """Measured behaviour: a resize writes over the following bytes; the file does not grow."""
+def test_allow_resize_shifts_the_following_bytes(load_script, pillow, fixtures,
+                                                 monkeypatch, capsys):
+    """A resize changes the file's length, and everything after the site moves with it.
+
+    This is the behaviour the flag promises. An earlier version wrote exactly as many bytes as
+    it read, so the file never grew while the documented contract said it would -- the flag's
+    only real effect was to defeat the equal-length guard. The assertions below pin the genuine
+    consequence, shift included, because a shifted file is a structural edit and the caller is
+    entitled to see that stated rather than inferred.
+    """
     pepatch = load_script("pepatch.py")
     first, _second = fixtures.pe64.plant_offsets
     original = pillow.read_bytes()
@@ -347,10 +354,12 @@ def test_allow_resize_overwrites_in_place_without_shifting(load_script, pillow, 
     payload = json.loads(capsys.readouterr().out)
     assert code == 0
     assert payload["structural"] == ["cli"]
-    assert payload["output_size"] == payload["input_size"] == len(original)
+    assert payload["output_size"] == payload["input_size"] + 2
     written = out.read_bytes()
+    assert len(written) == len(original) + 2
     assert written[first:first + 3] == b"\xCC\xCC\xCC"
-    assert written[first + 3:first + 12] == original[first + 3:first + 12], "offsets shifted"
+    # One byte was replaced by three, so the tail moved two bytes along.
+    assert written[first + 3:first + 14] == original[first + 1:first + 12]
 
 
 def test_failed_patches_stop_the_write(load_script, pillow, plant, monkeypatch, capsys):

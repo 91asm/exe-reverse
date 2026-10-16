@@ -438,6 +438,7 @@ def main():
         'sections_changed_materially': material,
         'byte_diff': {
             'differ_bytes': differ,
+            'differ_bytes_is_lower_bound': truncated,
             'truncated': truncated,
             'diff_budget': args.diff_budget,
             'merge_gap': args.merge_gap,

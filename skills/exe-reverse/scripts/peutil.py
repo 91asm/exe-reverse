@@ -67,7 +67,7 @@ MACHINE = {
     0x014C: 'i386', 0x0166: 'mips', 0x01C0: 'arm', 0x01C4: 'armv7',
     0x0200: 'ia64', 0x0266: 'mips16', 0x0366: 'mipsfpu', 0x0EBC: 'efi_bytecode',
     0x8664: 'amd64', 0xAA64: 'arm64', 0x01F0: 'powerpc',
-    0x0000: 'unknown', 0x0EBC: 'ebc',
+    0x0000: 'unknown',
 }
 
 SUBSYSTEM = {
@@ -126,6 +126,7 @@ def section_align(value):
     """Decoded IMAGE_SCN_ALIGN_* index, or None when the field is zero (the image case)."""
     return ALIGN_NAMES.get(value & ALIGN_MASK)
 
+
 # Resource type IDs that carry an ordinal name rather than a string.
 RESOURCE_TYPES = {
     1: 'CURSOR', 2: 'BITMAP', 3: 'ICON', 4: 'MENU', 5: 'DIALOG', 6: 'STRING',
@@ -146,20 +147,43 @@ def u8(b, o):
     return b[o]
 
 
+def _guard(fn, width, name):
+    """Run a fixed-width read, turning an out-of-range read into a ParseError.
+
+    A file truncated in the middle of a header is a normal input, not an exotic one: it is what
+    a partial download or a carved region looks like. Reported as `struct.error` it reaches the
+    caller as a traceback, which reads like a defect in the tool rather than a fact about the
+    file -- and the documented exit code for an unparseable image never gets used.
+    """
+    def read(b, o):
+        try:
+            return fn(b, o)
+        except struct.error as exc:
+            raise ParseError('file ends before the %s at offset 0x%X (length %d)'
+                             % (name, o, len(b))) from exc
+    return read
+
+
 def u16(b, o):
-    return struct.unpack_from('<H', b, o)[0]
+    return _u16(b, o)
 
 
 def u32(b, o):
-    return struct.unpack_from('<I', b, o)[0]
+    return _u32(b, o)
 
 
 def s32(b, o):
-    return struct.unpack_from('<i', b, o)[0]
+    return _s32(b, o)
 
 
 def u64(b, o):
-    return struct.unpack_from('<Q', b, o)[0]
+    return _u64(b, o)
+
+
+_u16 = _guard(lambda b, o: struct.unpack_from('<H', b, o)[0], 2, 'word')
+_u32 = _guard(lambda b, o: struct.unpack_from('<I', b, o)[0], 4, 'dword')
+_s32 = _guard(lambda b, o: struct.unpack_from('<i', b, o)[0], 4, 'signed dword')
+_u64 = _guard(lambda b, o: struct.unpack_from('<Q', b, o)[0], 8, 'qword')
 
 
 def bits(value, table):
@@ -187,6 +211,7 @@ class ParseError(Exception):
 class Section(object):
     __slots__ = ('name', 'virtual_size', 'virtual_address', 'raw_size',
                  'raw_pointer', 'characteristics', 'entropy', 'raw_tail')
+
     def __init__(self, **kw):
         for k in self.__slots__:
             setattr(self, k, kw.get(k))
@@ -341,7 +366,17 @@ class PE(object):
 
     @property
     def is_driver(self):
-        return self.subsystem == 1 and bool(self.dll_characteristics & 0x1000)
+        """A kernel-mode image, from two documented signals: a native subsystem and the DLL flag.
+
+        A third signal exists and is deliberately not required -- `IMAGE_DLLCHARACTERISTICS_WDM_DRIVER`
+        (0x2000) -- because it is set by WDM drivers specifically, so requiring it would miss other
+        kernel images. An earlier version of this property tested 0x1000, which the table in this
+        file (correctly) names `appcontainer`: measured over the driver directory of one Windows
+        installation, that test reported a kernel image zero times out of eighty. A wrong bit that
+        produces a plausible boolean is the failure shape this repository is organised against, so
+        the bit that is tested is the one the specification names.
+        """
+        return self.subsystem == 1 and bool(self.characteristics & 0x2000)
 
     @property
     def is_dotnet(self):
@@ -695,7 +730,11 @@ class PE(object):
             addr_raw = u32(self.d, e + 20)
             ptr_raw = u32(self.d, e + 24)
             item = {'type': DEBUG_TYPES.get(etype, str(etype)), 'type_id': etype,
-                    'size_of_data': size_of_data, 'pointer_to_raw_data': hex(ptr_raw)}
+                    'size_of_data': size_of_data,
+                    # Both address spaces, because the two fields are easy to confuse: this one
+                    # is an RVA, the next is a file offset.
+                    'address_of_raw_data': hex(addr_raw),
+                    'pointer_to_raw_data': hex(ptr_raw)}
             if etype == 2 and ptr_raw + 24 <= len(self.d):
                 sig = self.d[ptr_raw:ptr_raw + 4]
                 if sig == b'RSDS':
@@ -752,7 +791,7 @@ class PE(object):
         out = {'size': cfg_size}
         if cfg_size >= 0x5C:
             out['security_cookie'] = hex(u64(self.d, p + 0x58) if self.is_pe32plus
-                                        else u32(self.d, p + 0x3C))
+                                         else u32(self.d, p + 0x3C))
         if cfg_size >= 0x70:
             out['se_handler_table'] = hex(u32(self.d, p + (0x68 if self.is_pe32plus else 0x40)))
         if cfg_size >= 0x7C:
@@ -966,7 +1005,8 @@ def main():
         for d in report['imports']:
             named = [f.get('name') or ('#%d' % f.get('ordinal', 0)) for f in d['functions']]
             print('  %-28s %3d %s' % (d['dll'], len(d['functions']),
-                                       ', '.join(named[:6]) + (' ...' if len(named) > 6 else '')))
+                                      ', '.join(named[:6]) + (' ...' if len(named) > 6
+                                                              else '')))
     if report.get('exports'):
         e = report['exports']
         print('exports     : %s base=%d funcs=%d names=%d'

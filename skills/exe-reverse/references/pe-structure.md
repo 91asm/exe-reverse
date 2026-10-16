@@ -11,9 +11,9 @@ change is considered; when a signature, checksum or update check now rejects the
 decide whether a data-directory value is an RVA or a file offset; and whenever a memory dump has to be
 mapped back to file bytes.
 
-The authority for every field value, flag and offset below is the Microsoft PE format specification; a
-copy is at `_recon/facts/ms-pe-format.txt` in this repository and is cited as "the specification".
-Values marked `observed` were measured on this host and name the file.
+The authority for every field value, flag and offset below is the Microsoft PE format specification,
+published as part of the platform's own documentation and cited here as "the specification". Values
+marked `observed` were measured on this host and name the file.
 
 ## Two distinctions that decide everything
 

@@ -174,9 +174,14 @@ def build_pe(pe32=False, section_align=SECTION_ALIGN, file_align=FILE_ALIGN, pla
         lay.claim('dbg_rsds', len(rsds))
     lay.pad_to(0x10)
     rdata_payload_len = lay.cursor
-    if rdata_payload_len > rdata_virtual_pad:
-        raise ValueError('the .rdata structures (%d bytes) do not fit before the virtual tail'
-                         % rdata_payload_len)
+    # `Layout.claim` already refuses to overflow its buffer, so the only thing left to check is
+    # that the structures fit before whatever virtual tail was requested. An earlier guard
+    # compared the payload against the tail itself, which inverted the relationship and made the
+    # `no-virtual-tail` recipe -- tail of zero -- impossible to build.
+    if rdata_payload_len + rdata_virtual_pad > len(lay.buf):
+        raise ValueError('the .rdata structures (%d bytes) plus a %d-byte virtual tail exceed '
+                         'the reserved buffer (%d bytes)'
+                         % (rdata_payload_len, rdata_virtual_pad, len(lay.buf)))
 
     # ---- section table and RVA assignment -----------------------------------
     sections = [
@@ -244,11 +249,11 @@ def build_pe(pe32=False, section_align=SECTION_ALIGN, file_align=FILE_ALIGN, pla
         return base + lay.offsets[nm]
 
     lay.put('ilt', struct.pack(pack_thunk, r('hint_name')) +
-                  struct.pack(pack_thunk, ordinal_flag | 0x2A) +
-                  struct.pack(pack_thunk, 0))
+            struct.pack(pack_thunk, ordinal_flag | 0x2A) +
+            struct.pack(pack_thunk, 0))
     lay.put('iat', struct.pack(pack_thunk, r('hint_name')) +
-                  struct.pack(pack_thunk, ordinal_flag | 0x2A) +
-                  struct.pack(pack_thunk, 0))
+            struct.pack(pack_thunk, ordinal_flag | 0x2A) +
+            struct.pack(pack_thunk, 0))
     lay.put('imp_desc', struct.pack('<IIIII', 0, 0, 0, r('imp_dll'), r('iat')))
     lay.put('hint_name', hint_name)
     lay.put('imp_dll', imp_dll)
@@ -267,7 +272,7 @@ def build_pe(pe32=False, section_align=SECTION_ALIGN, file_align=FILE_ALIGN, pla
                                        image_base, image_base, image_base,
                                        image_base + r('tls_cb'), 0, 0))
         lay.put('tls_cb', struct.pack(pack_thunk, image_base + entry_rva) +
-                          struct.pack(pack_thunk, 0))
+                struct.pack(pack_thunk, 0))
     if with_debug:
         # IMAGE_DEBUG_DIRECTORY is 8 fields / 28 bytes, and the last one,
         # PointerToRawData, is a FILE OFFSET while AddressOfRawData is an RVA. Writing an

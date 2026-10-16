@@ -99,21 +99,12 @@ EXTERNAL_SCRIPTS: dict[str, str] = {}
 # normalised command text), not a line number, so it survives edits above it. Each entry
 # needs a reason, and the report prints them: an exclusion a reader can audit is not a
 # hole, whereas a silent one would be indistinguishable from a missed drift.
-_FINDINGS_QUOTE_REASON = (
-    "FINDINGS.md quotes this command as the historical defect it records. It is "
-    "evidence about the drift, not an instruction a reader runs; the page's own text "
-    "says the script has no --pkg.")
-_RECONSTRUCTION_QUOTE_REASON = (
-    "the same command appears in this pass's evidence file as the `--fix-report` "
-    "output that proves the checker catches it -- a reproduction of a defect, printed "
-    "with the fix beside it.")
-
-QUOTED_COMMANDS = {
-    ('docs/tool-verification/FINDINGS.md',
-     'python scripts/sig_probe.py --live --pkg <pkg>'): _FINDINGS_QUOTE_REASON,
-    ('docs/tool-verification/EXTENSION-reconstruction.md',
-     'python scripts/sig_probe.py --live --pkg <pkg>'): _RECONSTRUCTION_QUOTE_REASON,
-}
+#
+# Empty by design. Add an entry when an evidence record genuinely reproduces a command that no
+# longer matches a script -- typically to show that this checker caught the drift -- and state
+# which record quotes it and why. A command that is merely inconvenient to resolve belongs in
+# the script's own interface, not here.
+QUOTED_COMMANDS: dict[tuple, str] = {}
 
 
 # ---------------------------------------------------------------- script argument tables

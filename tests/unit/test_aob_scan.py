@@ -124,18 +124,27 @@ def test_load_patterns_parses_a_json_object(load_script, tmp_path):
         ("named.json[1]", [0xEB, 0x05], "EB 05")]
 
 
-def test_a_bare_json_list_is_not_accepted(load_script, tmp_path):
-    """Measured deviation: the docstring says "or a JSON object"; a bare list is not one.
+def test_a_bare_json_list_is_accepted(load_script, tmp_path):
+    """A top-level array is as reasonable a shape as an object with a "patterns" key.
 
-    The reader calls ``.get`` on whatever ``json.load`` returned, so a top-level array raises
-    AttributeError instead of the SystemExit this module uses for every other bad input. Pinned
-    so that a fix shows up here as a test change.
+    The reader used to call ``.get`` on whatever ``json.load`` returned, so a top-level array
+    raised AttributeError instead of the SystemExit this module uses for every other bad input.
+    Both shapes are read now, and anything else is refused with a message naming what was found.
     """
     aob = load_script("aob_scan.py")
     bare = tmp_path / "bare.json"
     bare.write_text('["CC CC"]', encoding="utf-8")
-    with pytest.raises(AttributeError):
-        aob.load_patterns(ns(patterns=[str(bare)]))
+    assert aob.load_patterns(ns(patterns=[str(bare)])) == [("bare.json[0]", [0xCC, 0xCC], "CC CC")]
+
+
+def test_a_json_scalar_is_refused_with_a_message(load_script, tmp_path):
+    """The shape that is still not a pattern file says so instead of raising."""
+    aob = load_script("aob_scan.py")
+    scalar = tmp_path / "scalar.json"
+    scalar.write_text('42', encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        aob.load_patterns(ns(patterns=[str(scalar)]))
+    assert "must hold an array or an object" in str(excinfo.value)
 
 
 @pytest.mark.parametrize("text,expected", [

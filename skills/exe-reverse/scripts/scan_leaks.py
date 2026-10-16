@@ -98,7 +98,18 @@ RULES = [
      re.compile(r'\b[a-z][a-z0-9+.\-]*://[^\s/@:]+:[^\s/@]+@[^\s/]+', re.I),
      'a URL carrying inline credentials'),
     ('endpoint', 'strong', 'public-ipv4-literal',
+     # Precision matters more than recall for the strong rules: a false positive here blocks a
+     # commit, and a gate that blocks commits wrongly is a gate people bypass.
+     #
+     # The negative lookahead drops a dotted quad whose every octet is 31 or below. That shape is
+     # a version number far more often than it is an address -- `4.2.1.0` reached this rule from a
+     # document field named ProductVersion -- while keeping the addresses that actually appear in
+     # notes. An earlier attempt used `\d{1,2}` for the same purpose and was wrong in the other
+     # direction: it also dropped `45.77.10.9`, which is exactly the shape this rule is for. The
+     # distinction is the octet value, not its digit count.
      re.compile(r'(?<![\d.])(?!10\.|127\.|192\.168\.|0\.|255\.|169\.254\.)'
+                r'(?!(?:\d|[12]\d|3[01])\.(?:\d|[12]\d|3[01])\.'
+                r'(?:\d|[12]\d|3[01])\.(?:\d|[12]\d|3[01])(?![\d.]))'
                 r'(?:\d{1,3}\.){3}\d{1,3}(?![\d.])'),
      'a routable address in an analysis note is usually a captured target'),
     ('endpoint', 'weak', 'literal-host-with-path',
@@ -117,7 +128,10 @@ RULES = [
      re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b'),
      'a personal address in an analysis note'),
     ('identity', 'weak', 'vendor-copyright-line',
+     # The repository's own licence line is not a target's copyright notice. Exempted by the
+     # phrase below rather than by filename, so this stays a content rule.
      re.compile(r'(?i)\bCopyright\s*(?:\(c\)|©)?\s*(?:19|20)\d{2}\s+'
+                r'(?![A-Za-z0-9 _.,&\-]*contributors\b)'
                 r'[A-Z][A-Za-z0-9 ,.&\-]{3,40}'),
      'a vendor copyright line lifted out of a resource or a binary'),
 ]
@@ -152,21 +166,57 @@ EXEMPT_TERMS = [
     (re.compile(r'(?i)\b(?:Windows|Microsoft|Redmond|Sysinternals|MSVC|MSBuild|Win32|'
                 r'NTFS|winnt\.h|ntddk|WDK|Windows SDK|Visual Studio|\.NET|PowerShell)\b'),
      'platform or vendor-of-the-platform term'),
+    # Language, runtime and format names followed by a version. Without these the
+    # product-name-with-version rule fires on every mention of a toolchain version, which is
+    # most of this repository's prose, and a gate whose output is mostly noise is one people
+    # stop reading.
+    (re.compile(r'(?i)\b(?:Python|CPython|PyPy|Node|Node\.js|npm|Java|JDK|JRE|Go|Golang|'
+                r'Rust|Cargo|Delphi|Pascal|\.NET|NET|Visual C\+\+|C\+\+|PE32\+?|COFF|'
+                r'Windows|Ghidra|IDA|WinDbg|x64dbg|radare2|rizin|Cutter|Unicorn|Capstone|'
+                r'Keystone|Frida|YARA|tiktoken|pytest|flake8|mypy|PyYAML|Ubuntu|Debian|'
+                r'macOS|Linux|Build|Version|v?CPUID|MSR|QEMU|VMware|VirtualBox|Hyper-V)\s*'
+                r'v?\d+(?:\.\d+)*\b'),
+     'a toolchain or platform version, not a target version'),
     # placeholders and obvious examples
     (PLACEHOLDER_HINT, 'placeholder token'),
     (re.compile(r'(?i)\b(?:example\.com|localhost|127\.0\.0\.1|0\.0\.0\.0|'
                 r'192\.0\.2\.\d+|198\.51\.100\.\d+|203\.0\.113\.\d+)\b'),
      'reserved documentation address'),
+    (re.compile(r'(?i)\b(?:img\.shields\.io|shields\.io|badge\.svg|badges\.shields\.io)\b'),
+     'a badge service, not a target endpoint'),
     (re.compile(r'\b(?:S-1-5-18|S-1-5-19|S-1-5-20|S-1-5-32-\d+)\b'),
      'well-known SID, not a machine identity'),
     (re.compile(r'(?i)\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b'),
      'a bare GUID is not machine identity without MachineGuid context'),
+    # A standard name with a version, and a version *field* with a value. Both reached the
+    # product-name rule in testing: `TPM 2.0` is a specification, `ProductVersion 4.2.1.0` is a
+    # field name. Neither identifies a product, and a rule that reports them is a rule people
+    # learn to skip.
+    #
+    # The version requirement belongs to *every* alternative. An earlier version of this entry
+    # put the suffix inside the group but after only one of the alternatives, so the bare
+    # protocol names matched on their own -- and `http` matched inside every `https://` URL.
+    # Two entries with one requirement each is harder to get wrong than one entry with a
+    # requirement that applies to some of its branches.
+    (re.compile(r'(?i)\b(?:TPM|UEFI|ACPI|SMBIOS|PCIe|NVMe|SATA|DirectX|OpenGL|Vulkan)'
+                r'\s*v?\d+(?:\.\d+)*\b'),
+     'a hardware or platform specification version, not a product identity'),
+    (re.compile(r'(?i)\b[A-Za-z]*(?:Version|Revision|Release|Build)\b\s*[:=]?\s*'
+                r'v?\d+(?:\.\d+)*'),
+     'a version field with its value, not a product identity'),
 ]
 
 # Paths never scanned: build output, dependencies, caches, and this file's own
 # rule table (which necessarily contains credential-shaped regex source).
 SKIP_DIRS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', 'build', 'dist',
-             '.mypy_cache', '.pytest_cache', '.ruff_cache'}
+             '.mypy_cache', '.pytest_cache', '.ruff_cache',
+             # Local working directories. Without these, a scan of the tree rather than of the
+             # tracked set walks whatever research material is on disk: measured here, an
+             # unfiltered walk produced over four thousand findings from a scratch directory
+             # that .gitignore already excludes from the repository, which made the tool
+             # unusable at exactly the moment it was needed.
+             '_recon', 'tools', 'samples', 'captures', 'exports', 'out', 'work',
+             'audit_out', '_tmp', '_work', '.cache'}
 SKIP_FILE_SUFFIX = ('.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.7z',
                     '.gz', '.exe', '.dll', '.sys', '.bin', '.so', '.pyc', '.woff',
                     '.woff2', '.ttf', '.jar', '.class', '.idb', '.i64', '.dmp')
@@ -192,8 +242,9 @@ def iter_files(root, files_from=None):
                         yield p
         return
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith('.')
-                            or d in ('.github',))
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if (d not in SKIP_DIRS and not d.startswith('.')) or d == '.github')
         for name in sorted(filenames):
             if name.lower().endswith(SKIP_FILE_SUFFIX):
                 continue

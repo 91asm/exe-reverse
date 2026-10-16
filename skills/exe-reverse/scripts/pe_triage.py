@@ -70,9 +70,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from peutil import (PE, ParseError, u8, bits, SUBSYSTEM, FILE_CHARACTERISTICS,   # noqa: E402
-                    DLL_CHARACTERISTICS, DIR_EXPORT, DIR_IMPORT, DIR_RESOURCE, DIR_SECURITY,
-                    DIR_BASERELOC, DIR_DEBUG, DIR_TLS, DIR_DELAY_IMPORT, DIR_LOAD_CONFIG,
-                    DIR_CLR, DIRECTORY_NAMES)
+                    DLL_CHARACTERISTICS, DIR_BASERELOC, DIR_CLR, DIRECTORY_NAMES)
 
 # Thresholds. Each one is a reporting threshold, not a correctness rule: it decides which rows
 # are worth printing, and every row that passes prints both the measurement and the threshold it
@@ -291,11 +289,11 @@ def build_signals(pe, data, args, imports_total, import_dlls):
 
     tls = pe.tls()
     if tls and tls.get('callback_rvas'):
+        callbacks = tls['callback_rvas']
         sig.append({
             'id': 'tls-callbacks-present',
             'where': None,
-            'measurement': '%d TLS callback(s) at %s' % (len(tls['callback_rvas']),
-                                                        ', '.join(tls['callback_rvas'])),
+            'measurement': '%d TLS callback(s) at %s' % (len(callbacks), ', '.join(callbacks)),
             'suggests': ('TLS callbacks execute before AddressOfEntryPoint, so a breakpoint at '
                          'the entry point can be too late and a patch there can be preceded by a '
                          'check. Set the first breakpoint on the callback instead.'),
@@ -473,9 +471,10 @@ def build_report(pe, data, args):
             'resource_types': res_types,
             'strings': strings,
             'strings_untrusted': True,
-            'strings_caveat': ('each sample is a raw byte window, so adjacent bytes can be '
-                                'included; a URL inside a certificate blob picks up the bytes '
-                                'that follow it. Verify a lead before relying on it'),
+            'strings_caveat': (
+                'each sample is a raw byte window, so adjacent bytes can be included; a URL '
+                'inside a certificate blob picks up the bytes that follow it. Verify a lead '
+                'before relying on it'),
         },
         'notes': list(pe.warnings),
     }
@@ -495,7 +494,7 @@ def build_report(pe, data, args):
             % (kind, pe.is_driver))
     if args.no_checksum:
         report['notes'].append('checksum computation was skipped (--no-checksum); the declared '
-                              'value is reported as declared and nothing is claimed about it')
+                               'value is reported as declared and nothing is claimed about it')
     return report
 
 
@@ -633,9 +632,9 @@ def print_text(rep, args):
     for step in rep['next']:
         print('  - %s' % step)
     print('\nsummary: %d signal(s), %d note(s), %d section(s), %d imported DLL(s). Read the '
-          'signals before choosing a tool' % (len(rep['signals']), len(rep['notes']),
-                                             rep['limits']['sections_total'],
-                                             rep['surface']['import_dll_count']))
+          'signals before choosing a tool'
+          % (len(rep['signals']), len(rep['notes']), rep['limits']['sections_total'],
+             rep['surface']['import_dll_count']))
 
 
 def main():

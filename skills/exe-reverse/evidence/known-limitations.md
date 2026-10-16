@@ -21,7 +21,7 @@ own scripts is never evidence about any target.
 
 ## Documentation-derived rather than measured
 
-Thirteen of the twenty-eight capability rows are `unverified`, and five more are `inferred`. The
+Fourteen of the twenty-eight capability rows are `unverified`, and five more are `inferred`. The
 split is not arbitrary: the rows on the `observed` side are the ones backed by a script that was run
 during the measurement pass, and everything else is a procedure that is written down and has not
 been executed here.
@@ -38,15 +38,14 @@ driver analysis (no driver built, signed or loaded, and test signing is not enab
 host); hardware tracing (nothing traced); hypervisor-assisted observation (nothing observed from
 inside a hypervisor); the two-build diff route (the script and the reference exist, neither was
 exercised); and disassembly (a library and a binutils disassembler are installed, no disassembly was
-performed). A fifteenth row, the capability registry the entry point's frontmatter advertises, is
-`unverified` because that script is not in the tree at all.
+performed).
 
-Three of these references are worth naming separately, because the entry point and the routing file
-both send a reader to them and the file is not present: `references/hardware-tracing.md` and
-`references/hypervisor-observation.md`. The repository's own gate reports them missing, along with
-`scripts/capabilities.py`. The route is described in the symptom index and the route table; the
-file that is supposed to carry the procedure does not exist. Treat those two routes as named and
-unavailable rather than as covered.
+Every reference file that the entry point and the routing table name exists in the tree at the
+recorded revision. That was not true throughout the pass: two route files and the capability
+registry script were absent at the first measurement and present at the last, and the repository gate
+went from reporting eleven missing paths to reporting none. The rows affected are graded against the
+later state, and the earlier state is kept in the evidence file, because a claim about what this
+skill covers is a claim about a revision.
 
 The `inferred` rows are licence-mechanism classification, algorithm and key recovery, anti-analysis
 handling, protector and packer recognition, and compiler fingerprinting. Each rests on a written
@@ -179,25 +178,42 @@ recorded with the host, the tool and the command that produced it.
 
 ## The scanner reports findings on this repository
 
-The identity scanner, run against the shipped skill surface, does not report `clean`. It reported
-five strong findings and exit code 1. All five are the scanner matching this repository's own text,
-and none of them is a real target identity:
+The identity scanner, run against the shipped skill surface, does not report `clean`. At the
+remeasurement it reported fifteen strong findings and exit code 1, spread across the entry point, the
+signature reference, the routing file, one route reference, the reader, and nine in the capability
+registry script. Every one of them is the scanner matching this repository's own text, and none is a
+real target identity. There are only two shapes:
 
-Three of them are the string `Python 3.9` in the entry point, the routing file and the reader's
-docstring, matched by the rule that catches a capitalised product name bound to a version number.
-Two are on one line of the signature reference: the example build identity `ProductVersion 4.2.1.0`,
-matched both by that same rule and by the rule that catches a routable address, because a four-field
-version number parses as a dotted quad.
+The first is a language name bound to a version number, caught by the rule for a capitalised product
+name with a version. The second is a four-field version number used as an example build identity,
+caught both by that same rule and by the rule for a routable address, because a four-field version
+number parses as a dotted quad.
+
+The literal matched strings are not reproduced here, and that is deliberate rather than fastidious.
+When this section was first written with those strings quoted, the repository's own finding count rose
+from five to twenty-two: describing a leak finding in the file that is scanned reproduces the trigger
+in the very document that reports it. A report of a finding has to name the shape of the match, not
+the bytes, or the report becomes a new instance of the problem it documents.
 
 Two things follow, and neither is an instruction to weaken the scanner. The rule that fires on the
 version quad is the same rule that catches a captured target address, so widening its exemptions is
-how a real address is let through. And the rule that fires on `Python 3.9` is doing its job on a
-genuinely ambiguous string; the wording is what should change.
+how a real address is let through. And the rule that fires on the language name plus version is doing
+its job on a genuinely ambiguous string; the wording of the file is what should change.
 
 A second run, pointed at the repository root rather than the shipped surface, did not complete inside
 a 120-second bound because that root also holds a large untracked recon tree. Whether the wider root
 carries findings is `unknown`; the run was cancelled, not reported as clean. A whole-repository pass
 should be given an explicit tracked-file list.
+
+One further operational limit belongs here, because it is the failure the gate itself produced on this
+host. With the console code page set to the local multi-byte encoding, the repository gate crashes
+while printing a leak finding, with a character-encoding error on the name of the encoding in use,
+and its verdict becomes unreachable. Running the same gate with the interpreter's output encoding
+forced to UTF-8 completes and reports the single remaining problem. The gate's own source documents a
+related decoding defect it already fixed elsewhere, so this is the same class of bug surviving on a
+different line: an encoding that is safe while reading a subprocess's output but not while printing
+it. Until it is fixed, a clean-looking gate run on such a console means the gate did not finish, not
+that it passed.
 
 ## The tree was being written during the measurement
 

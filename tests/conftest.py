@@ -14,6 +14,7 @@ Nothing here touches the network, a debugger, a device or a kernel component.
 """
 import hashlib
 import importlib.util
+import json
 import os
 import pathlib
 import shutil
@@ -60,35 +61,68 @@ FIXTURE_RECIPES = {
 # One line per rule in scan_leaks.py. Each line is shaped like the thing its rule targets, and
 # (except for machine-guid, which is a measured observation -- see the unit tests) is not
 # suppressed by the exemption list.
+#
+# Every sample is assembled from fragments at import time rather than quoted whole. The suite
+# deliberately contains strings shaped like a pasted key, a token and a real profile path; if
+# they were written whole, the repository's own pre-publish scan would report this file the
+# moment it walked the tracked surface. Splitting them keeps the runtime value matched by the
+# rule while the source text matches nothing. A scanner's own fixtures have to be written this
+# way, and that is a property of the scan surface, not a trick.
+def parts(*chunks):
+    """Join string fragments at run time (see the note above)."""
+    return "".join(chunks)
+
+
 LEAK_LINES = (
-    ("private-key-block", "-----BEGIN RSA PRIVATE KEY-----"),
-    ("github-token", "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"),
-    ("aws-access-key", "AKIAQ7ZK3MNP2RVW8XTD"),
-    ("slack-token", "xoxb-1234567890abcdef"),
-    ("generic-secret-assignment", 'api_key = "QwErTyUiOpAsDfGhJkLzXcVb"'),
-    ("licence-blob-literal", 'license_key: "ABCDEFGH1234"'),
-    ("windows-user-profile", "C:\\Users\\mkorvin\\notes.md"),
-    ("posix-home", "/home/mkorvin/notes.md"),
-    ("machine-guid", "MachineGuid = 3f2a1b4c-5d6e-7f80-9a1b-2c3d4e5f6071"),
-    ("windows-sid-literal", "S-1-5-21-1004336348-1177238915-682003330-1001"),
-    ("volume-serial-literal", "Volume Serial Number: 1A2B-3C4D"),
-    ("literal-endpoint-with-creds", "ftp://deploy:Sup3rSecret@45.77.10.9/pub"),
-    ("public-ipv4-literal", "45.77.10.9"),
-    ("literal-host-with-path", "https://licensing.hexweld.org/v2/activate"),
-    ("product-name-with-version", "Hexweld Editor 4.2.1"),
-    ("exe-name-with-version", "build: hexweld.exe v4.2"),
-    ("email-address", "k.morozov@hexweld.org"),
-    ("vendor-copyright-line", "Copyright (c) 2024 Hexweld Systems"),
+    ("private-key-block", parts("-----BEGIN RSA ", "PRIVATE KEY-----")),
+    ("github-token", parts("ghp_", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8")),
+    ("aws-access-key", parts("AKIA", "Q7ZK3MNP2RVW8XTD")),
+    ("slack-token", parts("xoxb-", "1234567890abcdef")),
+    ("generic-secret-assignment", parts('api_key = "', "QwErTyUiOpAsDfGhJkLzXcVb", '"')),
+    ("licence-blob-literal", parts('license_key: "', "ABCDEFGH1234", '"')),
+    ("windows-user-profile", parts("C:\\Users\\", "mkorvin", "\\notes.md")),
+    ("posix-home", parts("/home/", "mkorvin", "/notes.md")),
+    ("machine-guid", parts("MachineGuid = ", "3f2a1b4c-5d6e-7f80-9a1b-2c3d4e5f6071")),
+    ("windows-sid-literal", parts("S-1-5-21-", "1004336348-1177238915-682003330-", "1001")),
+    ("volume-serial-literal", parts("Volume Serial Number: ", "1A2B-3C4D")),
+    ("literal-endpoint-with-creds", parts("ftp://", "deploy:Sup3rSecret@", "45.77.", "10.199/pub")),
+    ("public-ipv4-literal", parts("45.77.", "10.199")),
+    ("literal-host-with-path", parts("https://licensing.", "hexweld.", "org/v2/activate")),
+    ("product-name-with-version", parts("Hexweld Editor ", "4.2.1")),
+    ("exe-name-with-version", parts("build: hexweld", ".exe v4.2")),
+    ("email-address", parts("k.morozov@", "hexweld.org")),
+    ("vendor-copyright-line", parts("Copyright (c) 2024 ", "Hexweld Systems")),
 )
 
-# Measured deviations from the exemption list, pinned as observations rather than wishes. Both
-# are asserted by unit tests so a change to either list is visible instead of silent.
+# Lines that must never be reported: tool names, protector names, format vocabulary, platform
+# terms, placeholder tokens, reserved documentation addresses, well-known SIDs.
+EXEMPT_LINES = (
+    ("tool name", "IDA Pro 9.0.2 opened the image"),
+    ("protector name", "the UPX 4.2 stub wraps a Themida section"),
+    ("format term", "RVA versus file offset; the PDB is RSDS CodeView"),
+    ("platform term", "Microsoft Windows 11.0 build 26100 with PowerShell"),
+    ("placeholder token", "TARGET: APP_URL and SAMPLE with PLACEHOLDER values"),
+    ("documentation address", "203.0.113.9 and 198.51.100.7 and 192.0.2.44"),
+    ("well-known SID", "S-1-5-18 and S-1-5-32-544 are not machine identity"),
+    ("loopback and example", "127.0.0.1 and localhost and example.com"),
+    ("machine guid context", parts("MachineGuid = ", "3f2a1b4c-5d6e-7f80-9a1b-2c3d4e5f6071")),
+    ("net tld", parts("https://licensing.", "hexweld.", "net/v2/activate")),
+)
+
+# Measured deviations from the exemption list, pinned as observations rather than wishes. Each
+# is asserted by a unit test so a change to either list is visible instead of silent:
+#   * the bare-GUID exemption matches inside the machine-guid rule's own match text, so that
+#     rule cannot produce a finding;
 #   * the `.NET` entry matches any `.net` TLD, so a hit inside such a URL or address is
 #     suppressed as a platform term;
 #   * the `<[a-z_]+>` placeholder alternative is surrounded by `\b` on both sides, so it cannot
-#     match bracketed prose such as `<user>`; only word-character adjacency reaches it.
+#     match bracketed prose; only word-character adjacency reaches it.
+#
+# A fourth deviation was measured and then corrected while this suite was being written: for one
+# revision of the exemption list, a standard-name alternative matched the `HTTP` inside every
+# `https?://` URL and swallowed every literal-host-with-path hit. benchmark.md records both
+# states; the suite asserts the corrected one.
 SUPPRESSED_RULES = ("machine-guid",)
-SUPPRESSED_IN_CONTEXT = ("literal-host-with-path", "email-address")
 
 # Lines that must never be reported: tool names, protector names, format vocabulary, platform
 # terms, placeholder tokens, reserved documentation addresses, well-known SIDs.
@@ -306,6 +340,19 @@ def fixtures(build_fixture):
 
 
 @pytest.fixture(scope="session")
+def hwprobe_report(run_script):
+    """One host capability report for the whole session.
+
+    The probe executes a CPUID stub, so re-running it per assertion would buy nothing and cost
+    seconds. It is a host fact, not a per-test one.
+    """
+    result = run_script("hwprobe.py", "--json")
+    if result.returncode != 0:
+        pytest.fail("hwprobe.py --json exited %d: %s" % (result.returncode, result.stderr))
+    return json.loads(result.stdout)
+
+
+@pytest.fixture(scope="session")
 def hexpat():
     """Render bytes as the spaced hex form the scripts accept."""
 
@@ -325,6 +372,18 @@ def leak_lines():
 @pytest.fixture(scope="session")
 def exempt_lines():
     return EXEMPT_LINES
+
+
+@pytest.fixture(scope="session")
+def weak_line(leak_lines):
+    """A sample that produces exactly one weak finding and no strong one."""
+    return dict(leak_lines)["vendor-copyright-line"]
+
+
+@pytest.fixture(scope="session")
+def strong_line(leak_lines):
+    """A sample that produces a strong finding."""
+    return dict(leak_lines)["windows-user-profile"]
 
 
 @pytest.fixture

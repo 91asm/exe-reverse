@@ -43,11 +43,10 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from peutil import PE, ParseError, u32, u64          # noqa: E402
+from peutil import PE, ParseError                      # noqa: E402
 
 
 # --- pattern handling ---------------------------------------------------------
@@ -272,8 +271,21 @@ def main():
 
     specs = []
     if args.spec:
-        with open(args.spec, encoding='utf-8') as fh:
-            specs = json.load(fh).get('patches', [])
+        if not os.path.isfile(args.spec):
+            sys.stderr.write('error: --spec %s is not a readable file\n' % args.spec)
+            return 2
+        try:
+            with open(args.spec, encoding='utf-8') as fh:
+                doc = json.load(fh)
+        except (OSError, ValueError) as exc:
+            sys.stderr.write('error: --spec %s could not be parsed as JSON: %s\n'
+                             % (args.spec, exc))
+            return 2
+        if not isinstance(doc, dict):
+            sys.stderr.write('error: --spec must hold an object with a "patches" array, '
+                             'not a bare %s\n' % type(doc).__name__)
+            return 2
+        specs = doc.get('patches', [])
         if not specs:
             sys.stderr.write('error: %s has no "patches" array\n' % args.spec)
             return 2
@@ -300,6 +312,14 @@ def main():
                          '--pattern/--at-rva/--at-offset\n')
         return 2
 
+    if args.allow_resize and len(specs) > 1:
+        sys.stderr.write('error: --allow-resize changes the length of the file, which moves '
+                         'every offset after the site. With more than one patch, the later '
+                         "patches' offsets no longer mean what they did when they were "
+                         'resolved, and a patch would land somewhere unintended. Apply a '
+                         'resizing edit on its own, or make every patch equal-length.\n')
+        return 2
+
     src_sha = hashlib.sha256(bytes(data)).hexdigest()
     applied = []
     errors = []
@@ -311,7 +331,13 @@ def main():
             continue
         applied.append(a)
         new, _ = parse_bytes(a['after'])
-        data[a['offset']:a['offset'] + len(new)] = bytes(new)
+        # Replace the *declared* span, not the replacement's own length. Slicing by the
+        # replacement's length is what made an earlier version's resize a no-op: the assignment
+        # wrote exactly as many bytes as it read, so a shorter replacement left the tail of the
+        # site in place and a longer one overwrote whatever followed it -- neither of which is a
+        # length change, and the second of which is silent corruption.
+        span = a['declared_length'] if a['declared_length'] else len(new)
+        data[a['offset']:a['offset'] + span] = bytes(new)
 
     changed_checksum = False
     if applied and not args.no_checksum and not args.dry_run:

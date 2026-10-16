@@ -78,8 +78,8 @@ is a filler or an overlay marker, not code.
 size of the initialised bytes on disk; the specification states that when `SizeOfRawData` is less
 than `VirtualSize` the remainder is zero-padded, and that the reverse (`SizeOfRawData` greater than
 `VirtualSize`) is also possible because only `SizeOfRawData` is rounded to `FileAlignment`
-(source: the Microsoft PE format specification, the copy at `_recon/facts/ms-pe-format.txt` in this
-repository, its "Section Data" section and section-header field table). Consequence: a large
+(source: the Microsoft PE format specification, its "Section Data" section and section-header field
+table). Consequence: a large
 `VirtualSize` with a small `SizeOfRawData` means uninitialised tail you will never find on disk,
 and a patcher that writes "into the section" without checking the raw range writes past the data.
 

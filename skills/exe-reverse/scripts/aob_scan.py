@@ -56,9 +56,22 @@ def load_patterns(args):
     for entry in args.patterns:
         if os.path.isfile(entry):
             if entry.lower().endswith('.json'):
-                with open(entry, encoding='utf-8') as fh:
-                    data = json.load(fh)
-                items = data.get('patterns', data if isinstance(data, list) else [])
+                try:
+                    with open(entry, encoding='utf-8') as fh:
+                        doc = json.load(fh)
+                except (OSError, ValueError) as exc:
+                    raise SystemExit('error: %s: %s' % (entry, exc))
+                # A bare array is as reasonable a shape as an object with a "patterns" key, and
+                # calling .get() on a list is what made an earlier version raise AttributeError
+                # instead of reading the file.
+                if isinstance(doc, list):
+                    items = doc
+                elif isinstance(doc, dict):
+                    items = doc.get('patterns', [])
+                else:
+                    raise SystemExit('error: %s: a JSON pattern file must hold an array or an '
+                                     'object with a "patterns" key, not a %s'
+                                     % (entry, type(doc).__name__))
                 for i, item in enumerate(items):
                     if isinstance(item, str):
                         out.append(('%s[%d]' % (os.path.basename(entry), i), item))

@@ -43,13 +43,23 @@
   ],
   "script_pins_note": "sha256_first16 is the first 16 hex characters of the SHA-256 of the file at the pinned size. It is a pin, not a full digest; a reader re-running these commands should confirm the byte size before expecting the same output. hwprobe.py was rewritten again after the window (27098 bytes), so its pin covers exactly the run quoted here and not the file as it stands later.",
   "tree_state_at_end_of_window": {
-    "local_time": "2026-10-16 19:17",
-    "reference_files_present": 31,
-    "scripts_present": 8,
-    "scripts_not_exercised_in_this_pass": ["pe_diff.py"],
-    "reference_files_named_but_absent": ["references/hardware-tracing.md", "references/hypervisor-observation.md"],
-    "scripts_named_but_absent": ["scripts/capabilities.py"],
-    "absent_files_evidence": "python check_repo.py, run at 19:17, reported 11 problems whose unique targets are those three files, plus the note that the tracked-file leak gate skipped because this tree is not a git checkout.",
+    "local_time_first_measurement": "2026-10-16 19:17",
+    "state_at_first_measurement": {
+      "reference_files_present": 31,
+      "scripts_present": 8,
+      "reference_files_named_but_absent": ["references/hardware-tracing.md", "references/hypervisor-observation.md"],
+      "scripts_named_but_absent": ["scripts/capabilities.py"],
+      "gate_output": "python check_repo.py reported 11 problems whose unique targets were those three files, plus the note that the tracked-file leak gate skipped because this tree is not a git checkout."
+    },
+    "local_time_remeasurement": "2026-10-16 19:22",
+    "state_at_remeasurement": {
+      "reference_files_present": 33,
+      "scripts_present": 9,
+      "reference_files_named_but_absent": [],
+      "scripts_named_but_absent": [],
+      "gate_output": "Every reference and script path now resolves: check_repo.py reports 1 problem, and it is the leak scan alone. check_routing.py reports RESULT=ok. With PYTHONIOENCODING unset on a GBK console, check_repo.py instead crashes with UnicodeEncodeError while printing a leak finding, so the gate's own verdict is unreachable on that console until the encoding is set."
+    },
+    "why_both_are_recorded": "Files named by the entry point and the routing table were absent at 19:17 and present at 19:22. Any row that cited a missing file was re-graded against the later measurement, and the earlier state is kept because it is what a reader of the 19:17 revision would have seen.",
     "subdirectories_present": ["references/coverage/route-inventory.md", "references/precedents/README.md"]
   },
   "rows": [
@@ -102,7 +112,7 @@
       "grade_not_higher": "Observed on this one host. The rows are per-machine by construction; nothing here transfers to another machine without re-running the probe there.",
       "evidence": [
         {"kind": "command", "script": "hwprobe.py", "command": "python skills/exe-reverse/scripts/hwprobe.py --json", "observed": "route table with nine rows in states available / needs-a-debugger, and a hypervisor is present / needs-privilege / needs-reboot-and-testsigning / needs-windbg / no documented user-mode path on this platform. CPU rows: vendor GenuineIntel; family 6 model 154 stepping 3; brand string 12th Gen Intel(R) Core(TM) i7-12700H; CPUID.01H:ECX[31] true; CPUID.07H.0:EBX[25] true; CPUID.14H.0 printed as raw 'max sub-leaf 1, capabilities EBX=0x0000005F' with a note that the bits must be read from the processor specification; CPUID.1CH.0 raw; CPUID.0AH.0 'ver 6, counters 5'. OS rows include the ProductName-versus-build warning and four registry rows in state unavailable with the statement that an absent value is not the same as a feature being off."},
-        {"kind": "measurement", "script": "hwprobe.py", "command": "Measure-Command { python skills/exe-reverse/scripts/hwprobe.py --json > %TEMP%\\dsh-probe.json }", "observed": "TotalMilliseconds 2066.846, on an earlier revision of the script (sha256_first16 F79370D7D181C72A). Recorded as an order of magnitude, not as a bound for the current revision."},
+        {"kind": "measurement", "script": "hwprobe.py", "command": "Measure-Command { python skills/exe-reverse/scripts/hwprobe.py --json > %TEMP%\\dsh-probe.json }", "observed": "the timing command reported 2066.846 ms, on an earlier revision of the script (sha256_first16 F79370D7D181C72A). Recorded as an order of magnitude, not as a bound for the current revision."},
         {"kind": "observation", "script": "hwprobe.py", "command": "python skills/exe-reverse/scripts/hwprobe.py --json (privilege rows)", "observed": "TokenElevation true, and the report prints a TokenUser SID. The SID is deliberately not reproduced here or anywhere in this repository: the probe's own output is an identity surface, and this is the concrete case the environment reference warns about."}
       ],
       "dependency_not_shipped": "nothing to run it; a second machine is needed to make any row transferable",
@@ -130,7 +140,7 @@
       "grade": "observed",
       "grade_not_higher": "Observed as a scanner that runs and classifies. Its result on this repository is findings, not clean, and three of the five hits are the scanner matching its own repository's text: see known-limitations.md.",
       "evidence": [
-        {"kind": "command", "script": "scan_leaks.py", "command": "python skills/exe-reverse/scripts/scan_leaks.py", "observed": "scanned 38 files under the default root; 5 strong, 0 weak, 2 suppressed; RESULT=findings; exit 1. The five hits are: 'Python 3.9' in SKILL.md, references/routing.md and scripts/peutil.py by rule product-name-with-version; '4.2.1.0' in references/aob-and-signatures.md by rule public-ipv4-literal; 'ProductVersion 4.2.1.0' on the same line by rule product-name-with-version."},
+        {"kind": "command", "script": "scan_leaks.py", "command": "python skills/exe-reverse/scripts/scan_leaks.py", "observed": "at the first measurement: 38 files scanned, 5 strong, 0 weak, 2 suppressed, RESULT=findings, exit 1. At the remeasurement: 15 strong, 0 weak, 5 suppressed, RESULT=findings, exit 1, spread across SKILL.md, references/aob-and-signatures.md (two hits on one line), references/hypervisor-observation.md, references/routing.md, scripts/capabilities.py (nine hits) and scripts/peutil.py. Two shapes only: a language name bound to a version number, and a four-field version number used as an example build identity, which the address rule also catches because it parses as a dotted quad. The literal matched strings are deliberately not reproduced in this evidence file: writing them here reproduces exactly what the rules match, and that was observed as a real effect when this file was first written and the repository's finding count rose from 5 to 22 until the quoted strings were replaced with a description of their shape."},
         {"kind": "command", "script": "scan_leaks.py", "command": "python skills/exe-reverse/scripts/scan_leaks.py --root E:\\exe-reverse --quiet --max 5", "observed": "did not complete within a 120 s bound on the repository root, because that root also holds a large untracked recon tree. Whether the wider root has findings is unknown; the run was cancelled rather than reported as clean. Use --files-from with an explicit tracked-file list for a whole-repository pass."},
         {"kind": "observation", "script": "scan_leaks.py", "command": "documented default root, read from the script's own source", "observed": "the default root resolves to the parent of the skill directory (two levels up from scripts/), which is the shipped skill surface, not the repository root three levels up. That is why the default run scans 38 files and the repository-root run walks everything."}
       ],
@@ -296,9 +306,9 @@
       "id": "installers-and-packaging",
       "capability": "Extract an installer's inner payload, then re-triage what came out as a new unknown.",
       "grade": "unverified",
-      "grade_not_higher": "The reference now exists in the tree, but it did not at the start of this pass and the route names a much larger dependency than this repository ships. Only the outer image is reachable with the shipped reader; the inner container and install-time behaviour rest on nothing measured here.",
+      "grade_not_higher": "The route names a much larger dependency than this repository ships, and that is the whole of the grade: only the outer image is reachable with the shipped reader, while the inner container and install-time behaviour rest on nothing measured here.",
       "evidence": [
-        {"kind": "documentation", "script": null, "command": "python check_repo.py at 19:16 and at 19:17", "observed": "references/installers-and-packaging.md was reported MISSING at 19:16 and is present at 19:17, which is why this row's grade records the tree state rather than a run"},
+        {"kind": "tree_state", "script": null, "command": "python check_repo.py at 19:16, at 19:17 and at 19:22", "observed": "references/installers-and-packaging.md was reported MISSING at 19:16, present from 19:17, and every reference path resolves at 19:22. The grade records the route rather than the file, so it does not move when the file appears."},
         {"kind": "documentation", "script": null, "command": "read references/coverage-and-limits.md", "observed": "the direction is graded inferred there on the grounds that the reader parses a PE and its resources, so an installer's outer image is readable, while the inner container and install-time behaviour rest on nothing measured"}
       ],
       "dependency_not_shipped": "an unpacker for the installer's own container, and a disposable machine to install on",
@@ -360,27 +370,27 @@
       "id": "hardware-tracing",
       "capability": "Observe a check without modifying anything, by recording the executed control-flow trajectory.",
       "grade": "unverified",
-      "grade_not_higher": "Nothing was traced. The processor reports the feature and the probe states there is no documented user-mode path to the trace unit on this platform, so capture, not decoding, is the constraint. The reference file this route names is absent from the tree, so a reader of the installed skill finds the route named and the file missing.",
+      "grade_not_higher": "Nothing was traced. The processor reports the feature and the probe states there is no documented user-mode path to the trace unit on this platform, so capture rather than decoding is the constraint. The reference exists at the remeasurement and was not exercised, so the procedure is documented and unmeasured.",
       "evidence": [
         {"kind": "command", "script": "hwprobe.py", "command": "python skills/exe-reverse/scripts/hwprobe.py --json", "observed": "CPU row CPUID.07H.0:EBX[25] true, so the processor advertises trace support; route row 'Intel Processor Trace capture' in state 'no documented user-mode path on this platform' with the note that reaching the trace unit needs a driver or an undocumented in-box interface, and that a hypervisor is present. CPUID.14H.0 was printed raw (max sub-leaf 1, EBX=0x0000005F) rather than decoded."},
-        {"kind": "gate_output", "script": null, "command": "python check_repo.py at 19:17", "observed": "MISSING skills\\exe-reverse\\SKILL.md -> references/hardware-tracing.md, and the same from references/routing.md"}
+        {"kind": "tree_state", "script": null, "command": "file existence check on references/hardware-tracing.md, plus python check_repo.py", "observed": "absent at the first measurement, where the gate reported MISSING skills\\exe-reverse\\SKILL.md -> references/hardware-tracing.md and the same from references/routing.md; present at the remeasurement, where every reference path resolves and the gate's only remaining problem is the leak scan. The grade is unchanged either way, because the file existing is not the same as the route having been run."}
       ],
       "dependency_not_shipped": "a capture path (driver or a documented interface), and a decoder",
       "raise_grade": "Establish a capture path, trace one target's startup, and confirm the trace is pinned to an artifact digest and a host build.",
-      "evidence_file_pointers": ["references/hardware-tracing.md (named but absent)", "references/handoff-boundaries.md"]
+      "evidence_file_pointers": ["references/hardware-tracing.md", "references/handoff-boundaries.md"]
     },
     {
       "id": "hypervisor-assisted-observation",
       "capability": "Observe from below a hypervisor when a debugger cannot own the debug registers.",
       "grade": "unverified",
-      "grade_not_higher": "Nothing was observed from inside a hypervisor. The host has a hypervisor present, which is a fact about this machine that raises the relevance of the route without making it available. The reference file this route names is absent from the tree.",
+      "grade_not_higher": "Nothing was observed from inside a hypervisor. The host has a hypervisor present, which is a fact about this machine that raises the relevance of the route without making it available. The reference exists at the remeasurement and was not exercised.",
       "evidence": [
         {"kind": "command", "script": "hwprobe.py", "command": "python skills/exe-reverse/scripts/hwprobe.py --json", "observed": "CPU row CPUID.01H:ECX[31] true (a hypervisor is running the guest), and the hardware-breakpoint route row is consequently reported as needing a debugger with the hypervisor caveat attached. Four security-feature registry rows were reported unavailable with the explicit statement that an absent value is not the same as the feature being off, so the security-service state on this host is unknown rather than disabled."},
-        {"kind": "gate_output", "script": null, "command": "python check_repo.py at 19:17", "observed": "MISSING skills\\exe-reverse\\SKILL.md -> references/hypervisor-observation.md, and the same from references/routing.md"}
+        {"kind": "tree_state", "script": null, "command": "file existence check on references/hypervisor-observation.md, plus python check_repo.py", "observed": "absent at the first measurement, where the gate reported it missing from both SKILL.md and references/routing.md; present at the remeasurement."}
       ],
       "dependency_not_shipped": "a hypervisor, a configuration that permits it, and a second host",
       "raise_grade": "Establish the route on a host where it can be configured, and record which observations the hypervisor could see that a user-mode instrument could not.",
-      "evidence_file_pointers": ["references/hypervisor-observation.md (named but absent)", "references/coverage-and-limits.md"]
+      "evidence_file_pointers": ["references/hypervisor-observation.md", "references/coverage-and-limits.md"]
     },
     {
       "id": "pe-diff-and-versions",
@@ -410,14 +420,17 @@
     },
     {
       "id": "capability-registry",
-      "capability": "Publish the machine-readable capability registry the entry point advertises.",
-      "grade": "unverified",
-      "grade_not_higher": "The entry point's frontmatter names a capability registry at a script path that does not exist in the tree, so the advertised registry cannot be read, run or checked by anyone. This evidence file is not a substitute: it is written per route with its own grading rules and it does not claim to be the registry.",
+      "capability": "Publish the machine-readable capability registry the entry point advertises, and resolve each registered capability against the host that is actually running.",
+      "grade": "observed",
+      "grade_not_higher": "The registry runs and reports. What it reports is a per-host state per capability, which is a fact about the machine and not about the routes: a registered capability reported available here is available here, and nothing about that transfers. The registry was also absent for most of the measurement pass, so a reader of the earlier revision had no registry at all.",
       "evidence": [
-        {"kind": "gate_output", "script": null, "command": "python check_repo.py at 19:17", "observed": "MISSING skills\\exe-reverse\\SKILL.md -> scripts/capabilities.py and MISSING skills\\exe-reverse\\references\\routing.md -> scripts/capabilities.py, in an otherwise coherent tree (check_routing.py reported 33 symptom rows mirrored, 33 reference rows and 9 script rows)"}
+        {"kind": "command", "script": "capabilities.py", "command": "python skills/exe-reverse/scripts/capabilities.py --json", "observed": "21 registry entries, keys id, what, needs, needs_short, detect, script, reference, boundary; the top-level JSON also carries python, platform, probe, host, capabilities and states. The probe block reports {\"available\": false, \"reason\": \"not probed (no --check)\"}, so the file states which mode produced its numbers rather than implying that a static listing was a measurement."},
+        {"kind": "command", "script": "capabilities.py", "command": "python skills/exe-reverse/scripts/capabilities.py --check", "observed": "'capabilities.py: error: choose one of --list, --check, --explain ID or --json' with exit 2 when invoked with no mode, and with a mode: '21 capabilities: available=14, needs-something=7', each row naming the script that covers it or the thing it needs, for example interactive-user-debugger reported needs-x64dbg and memory-dump-analysis reported needs-procdump with the note that the inventory behind the row is the probe's tool scan. It closes by stating that a capability this host lacks is a finding about the machine, not a failure of the task, and never changes the exit code."},
+        {"kind": "comparison", "script": null, "command": "registry --json against this file's rows", "observed": "the registry enumerates 21 capabilities and this evidence file grades 28 routes. The two are different granularities rather than a disagreement: the registry is the shipped index of routes, and this file is a per-route evidence record that also carries routes the registry does not enumerate, including the reference-only ones. A reader should not treat the registry as this file, or the reverse."},
+        {"kind": "tree_state", "script": null, "command": "file existence check on scripts/capabilities.py", "observed": "absent at the first measurement, where the gate reported MISSING skills\\exe-reverse\\SKILL.md -> scripts/capabilities.py; present at 27186 bytes at the remeasurement. The row is graded on the later state because the script was run there."}
       ],
-      "dependency_not_shipped": "the registry script itself",
-      "raise_grade": "Ship the registry, and have the repository gate check that each registered capability has an evidence row here and a grade that matches.",
+      "dependency_not_shipped": "nothing to run it; the registry depends on the probe's inventory for the rows it cannot measure itself",
+      "raise_grade": "Add a check that every registered capability has a matching evidence row here with a grade, so that a capability cannot be registered without a recorded basis.",
       "evidence_file_pointers": ["SKILL.md frontmatter (capability_registry)", "references/routing.md"]
     }
   ]

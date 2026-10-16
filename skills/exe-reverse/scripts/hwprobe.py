@@ -523,6 +523,7 @@ def main():
 
     print('host capability report')
     print('  python %s on %s' % (report['python'], report['platform']))
+
     def show(title, rows, width=52):
         print('\n== %s ==' % title)
         for r in rows:

@@ -397,8 +397,8 @@ def capability_state(cap, facts):
     if kind == 'tool':
         hits = [t for t in arg if facts['tools'].get(t)]
         if hits:
-            return 'available', 'found: %s' % ', '.join('%s (%s)' % (h, facts['tools'][h])
-                                                         for h in hits[:2])
+            found = ', '.join('%s (%s)' % (h, facts['tools'][h]) for h in hits[:2])
+            return 'available', 'found: %s' % found
         if not facts['probe']['available']:
             return 'unknown', facts['probe']['reason']
         if len(arg) == 1:

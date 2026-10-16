@@ -318,6 +318,16 @@ def check_leaks():
 
 
 def main():
+    # The leak step prints lines that were produced by another process, and those can contain
+    # characters this console's codec cannot encode. Without this, the gate dies while
+    # *reporting* a finding -- the worst possible moment, because the crash looks like the gate
+    # is broken rather than like the repository has something to look at. Measured on a GBK
+    # console: `UnicodeEncodeError` from this function, with the real finding unprinted.
+    try:
+        sys.stdout.reconfigure(errors='replace')
+        sys.stderr.reconfigure(errors='replace')
+    except (AttributeError, ValueError):
+        pass
     skills = discover_skills()
     print('== skills discovered ==')
     if not skills:
