@@ -28,7 +28,7 @@ installer, extracted with `innoextract`, whose payload contained a 26,821,600-by
 | The launcher beside the engine | 73.6 KiB | A launcher. It starts the engine and does nothing interesting |
 | `data/app.so` | 26.8 MB, **ELF64, x86-64, ET_DYN** | The compiled Dart. An **ELF** shared object inside a Windows application |
 | `.text` | 16.7 MB, flags `0x6` (alloc + execute) | The AOT-compiled Dart code |
-| `.rodata` | 10.1 MB | Object pool, string literals, metadata |
+| `.rodata` | 10.1 MB | Read-only data: string literals, constants, metadata |
 | `.dynsym` | 144 bytes | Six symbols. The image is stripped of everything useful |
 | `.eh_frame` | 66 bytes | No unwinding data, so a stack walk gives you nothing |
 | relocation sections | **none** | No `.rela.dyn` or `.rela.plt` at all |
@@ -49,34 +49,52 @@ of the loaded code.
 The natural first move for a stripped binary is: find a string, then find the instruction that
 loads its address. On this image that method returns a confidently wrong answer, and the
 measurement is worth recording because a plausible-looking negative is worse than no answer.
-`observed`, over the whole 16.7 MB `.text`:
+**A byte scan over `.text` reports instruction shapes that are not there, and the way it fails is
+worth recording in full**, because every step of it looked like evidence.
 
-| Idiom | Occurrences |
+Three models were tried against this image, and two were disposed of by measurement before the third
+was believed:
+
+| Model | What was measured | Verdict |
+|---|---|---|
+| a self-relative load, `mov r64, [rip+disp32]`, whose displacement names the literal | a few hundred byte-pattern hits, **none** landing in the read-only data | refuted, wrongly read as "this image does not reference its data that way" |
+| a table of absolute addresses in the data section | **no** run of 8-byte words pointing into the image, across all 10 MB | refuted |
+| a compressed-pointer pool: 4-byte tagged values inside the data section | a contiguous run of 97,751 such values, 100% in range against a 0.23% random baseline, slots that appeared to name literals once a tag bit was cleared | **believed, and wrong** |
+
+The third model produced the kind of result that is easiest to accept, and a real disassembler
+disposes of it in two lines (`observed`; capstone, installed on this host):
+
+| Measurement | Result |
 |---|---|
-| `mov r64, [r15 + disp32]` — a load through a register-held base | **110,641** |
-| `mov r64, [rip + disp32]` — a self-relative load | **554** |
-| …of those, targets landing anywhere in `.rodata` | **0** |
+| `mov r15, imm64` found by byte pattern, immediates examined | nine, whose "immediates" are plainly other instructions (`0xF8458B48C1894800` decodes as `mov rcx, rax; mov rax, [rbp-8]`) -- the pattern matched *inside* operands |
+| genuine writes to `r15`, decoded at real instruction boundaries | **zero** |
+| `[r15 + disp]` operands, decoded at real instruction boundaries | **zero** |
 
-Dart's AOT code reaches its data through an **object pool**, held in a callee-saved register
-(`r15` on this target, which is a compiler choice rather than a rule), and the pool lives in the
-read-only data. Self-relative loads exist but never address the literal region.
+The cause is structural rather than a coding slip. A byte pattern over variable-length code has no
+notion of where instructions begin, so it matches inside operands and inside data. `.text` here also
+opens with zero padding and the ELF entry point is **0**, because this artifact is a shared object
+rather than a program, so there is no address from which a reliable sweep can start. The earlier
+counts were measuring the scanner, not the image.
 
-So an instruction scan for "who references this string" finds nothing, and reporting "0
-references" from it is a false negative dressed as a result. The 8-byte values in `.rodata` that
-look like pointers into the literal region are the literal *data itself* being misread: their
-targets land at offsets like `+3` inside other strings.
+**What survives, and what is withdrawn.** Literal recovery is unaffected: it scans printable runs,
+which needs no instruction boundaries and can be checked by eye. Every claim about *which code*
+references a literal is withdrawn, and the tool no longer reports one.
 
-**The correct route is to parse the object pool**, not to scan instructions. That is what
-version-matched snapshot tooling does.
+**What would be needed.** Reference sites require the snapshot's own layout parsed, which means
+tooling built for the exact release that produced the file. `observed`: the release here is **3.3.4**,
+read from the companion executable's runtime string rather than from the stripped payload, which
+carries no version at all. State the boundary instead of working around it -- "the literals name the
+feature and its vocabulary; the code that reads them is not reachable with what is installed here" is
+a true, useful report, and it is the one this file supports.
 
 ## Locating behaviour: what works, and in what order
 
 1. **Extract the installer first.** Everything below operates on the payload, and the payload is
    what `app.so` is inside.
-2. **Confirm the shape.** `scripts/dart_snapshot_strings.py app.so --observe` prints the section
-   layout and the two instruction counts above. A large pool-load count with near-zero
-   self-relative loads identifies this family of image immediately, and tells you not to spend a
-   session on instruction scanning.
+2. **Confirm the shape.** `scripts/dart_snapshot_strings.py app.so` prints the section layout, and
+   the layout is the identification: a very large code section, a large data section, a symbol table
+   measured in bytes, and an unwinding table that is a stub. Nothing needs disassembling to see it,
+   which matters because the disassembly is the part that cannot be trusted here.
 3. **Recover literals and search them.** `scripts/dart_snapshot_strings.py app.so --find premium,licen,vip`
    is the cheapest step that produces real leads, because a string literal survives AOT compilation
    and minification while names do not. Both one-byte (UTF-8) and two-byte (UTF-16) literals are

@@ -78,22 +78,6 @@ def test_the_default_run_reports_every_literal_it_recovered(run_script, syntheti
     assert reported_count(result.stdout) == 3
 
 
-def test_the_reference_mechanism_is_reported_as_counts_and_a_note(run_script, synthetic_elf):
-    """Zero and zero on a generated image, with the note that explains what a real one looks like."""
-    result = run_script("dart_snapshot_strings.py", synthetic_elf.path)
-    assert "reference mechanism : 0 pool load(s) through r15, 0 self-relative load(s)" \
-        in result.stdout
-    assert "0 of the self-relative loads land in .rodata" in result.stdout
-    assert "object pool" in result.stdout
-
-
-def test_no_observe_skips_the_second_pass(run_script, synthetic_elf):
-    result = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--no-observe")
-    assert result.returncode == 0, result.stderr
-    assert "reference mechanism" not in result.stdout
-    assert reported_count(result.stdout) == 3
-
-
 def test_min_length_filters_the_short_literals_out(run_script, synthetic_elf):
     result = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--min-length", "12")
     assert result.returncode == 0, result.stderr
@@ -244,33 +228,6 @@ def test_at_can_be_combined_with_find(run_script, synthetic_elf):
 
 
 # --- json --------------------------------------------------------------------
-
-def test_json_carries_the_matches_and_the_pool_observation(run_script, synthetic_elf):
-    result = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--json")
-    assert result.returncode == 0, result.stderr
-    payload = json.loads(result.stdout)          # the whole stream: this mode prints no RESULT line
-    assert payload["image"] == str(synthetic_elf.path)
-    assert payload["elf"]["machine"] == "x86-64"
-    assert payload["elf"]["type"] == "shared-object"
-    assert payload["literals_recovered"] == 3
-    assert [entry["text"] for entry in payload["matches"]] == \
-        [entry["text"] for entry in synthetic_elf.literals]
-    for entry, fixture in zip(payload["matches"], synthetic_elf.literals):
-        assert entry["offset"] == hex(fixture["offset"])
-        assert entry["vaddr"] == hex(fixture["vaddr"])
-        assert entry["encoding"] == fixture["encoding"]
-    observation = payload["pool_observation"]
-    assert observation["pool_loads_r15"] == 0
-    assert observation["self_relative_loads"] == 0
-    assert "note" in observation
-
-
-def test_json_with_no_observe_reports_no_observation(run_script, synthetic_elf):
-    result = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--json", "--no-observe")
-    payload = json.loads(result.stdout)
-    assert payload["pool_observation"] is None
-    assert payload["literals_recovered"] == 3
-
 
 def test_json_returns_one_when_the_filter_matched_nothing(run_script, synthetic_elf):
     """The exit code means the same thing in both output modes.

@@ -160,11 +160,10 @@ SUPPRESSED_RULES = ("machine-guid",)
 # (ASCII) literal and one two-byte (UTF-16LE) literal at known offsets, and a section-name string
 # table. A few hundred bytes, written at test time into the session temporary directory.
 #
-# What this image is *not*: a Flutter snapshot. The counts the reader's own docstring records --
-# 110,641 pool loads and 5 self-relative loads in a real 26.8 MB `app.so` -- came from a real target
-# and cannot be reproduced from a generated file. The fixture exists to hold the reader against a
-# container whose offsets are known in advance, which is what proves the recovery and counting
-# logic; the real measurement stays a recorded observation in the script's docstring.
+# What this image is *not*: a real snapshot. It exists so the reader can be held against a container
+# whose offsets are known in advance, which is what proves the literal-recovery logic. The
+# instruction-level counts an earlier version of the reader reported were withdrawn -- a byte scan
+# cannot read this format, and the reference records why -- so nothing here stands in for them.
 
 # Neither `49 8B /r` (a pool load through r15) nor `4X 8B|8D 05` (a RIP-relative load) appears in
 # these bytes, which is what makes the zero counts below a measurement rather than an artifact.

@@ -6,11 +6,11 @@ one one-byte (ASCII) literal and one two-byte (UTF-16LE) literal at known offset
 section-name string table. Offsets are read from the fixture's own record of where it put each
 literal, never hardcoded here.
 
-What the synthetic image cannot do is be a Flutter snapshot. The counting in `pool_observation` is
-documented against a real 26.8 MB `app.so` -- 110,641 pool loads and 5 self-relative loads -- and
-that measurement stays a recorded observation in the script's docstring. What these tests hold is
-the *logic*: zero on an image carrying neither idiom, and non-zero on hand-built bytes carrying each
-one, so a counter that silently stopped counting would fail rather than look clean.
+What the synthetic image cannot do is be a real snapshot. Literal recovery is what these tests hold:
+a one-byte and a two-byte literal at known offsets, a case-insensitive filter, and an offset probe
+that resolves anywhere a literal occupies. The instruction-level observations this file once carried
+are **withdrawn** -- a byte scan cannot read this format, and the reference records why -- so nothing
+here asserts anything about how a reference is encoded.
 """
 import pytest
 
@@ -224,76 +224,3 @@ def test_the_code_section_yields_no_literals(load_script, synthetic_elf):
 
 
 # --- pool observation --------------------------------------------------------
-
-def test_the_fixture_carries_neither_idiom_and_the_counts_say_so(load_script, synthetic_elf):
-    """The honest half of this file: a generated image is not a Flutter snapshot, so the counts are
-    zero, and the note is what tells a reader why that matters."""
-    dss = load_script("dart_snapshot_strings.py")
-    text = dss.Elf(synthetic_elf.data).section(".text")
-    observation = dss.pool_observation(synthetic_elf.data, text)
-    assert observation["pool_loads_r15"] == 0
-    assert observation["self_relative_loads"] == 0
-    assert observation["self_relative_into_rodata"] == 0
-    assert set(observation) == {"pool_loads_r15", "self_relative_loads",
-                               "self_relative_into_rodata", "note"}
-    assert "object pool" in observation["note"]
-    assert "version-matched" in observation["note"]
-
-
-def test_a_pool_load_through_r15_is_counted(load_script):
-    """The positive case: without it, a counter that never increments would pass the zero test."""
-    dss = load_script("dart_snapshot_strings.py")
-    data = POOL_LOAD + FILLER
-    observation = dss.pool_observation(data, text_section(data))
-    assert observation["pool_loads_r15"] == 1
-    assert observation["self_relative_loads"] == 0
-
-    twice = POOL_LOAD + FILLER + POOL_LOAD + FILLER
-    assert dss.pool_observation(twice, text_section(twice))["pool_loads_r15"] == 2
-
-
-def test_a_load_through_a_different_register_is_not_counted_as_a_pool_load(load_script):
-    """`49` is the REX.B prefix that makes the base r15. A load through another register is a
-    different claim, and the docstring is explicit that the register choice is evidence about the
-    image rather than a rule."""
-    dss = load_script("dart_snapshot_strings.py")
-    data = hex_bytes(0x48, 0x8B, 0x87, 0x10, 0x00, 0x00, 0x00) + FILLER
-    observation = dss.pool_observation(data, text_section(data))
-    assert observation["pool_loads_r15"] == 0
-
-
-def test_a_self_relative_load_into_rodata_is_counted_and_attributed(load_script, synthetic_elf):
-    """The disp32 is solved here so the target lands inside the fixture's read-only region.
-
-    The range the counter treats as `.rodata` is the one the real image measured (`0x200` plus
-    10 082 704 bytes), not the fixture's own mapping, so the target is placed at the start of that
-    range rather than at the fixture's `.rodata` vaddr.
-    """
-    dss = load_script("dart_snapshot_strings.py")
-    vaddr = 0x1000
-    target = 0x400000
-    disp = target - (vaddr + 7)
-    data = hex_bytes(0x48, 0x8B, 0x05) + disp.to_bytes(4, "little") + FILLER
-    observation = dss.pool_observation(data, text_section(data, vaddr=vaddr))
-    assert observation["self_relative_loads"] == 1
-    assert observation["self_relative_into_rodata"] == 1
-    assert observation["pool_loads_r15"] == 0
-
-
-def test_a_self_relative_load_landing_outside_rodata_is_counted_but_not_attributed(load_script):
-    dss = load_script("dart_snapshot_strings.py")
-    vaddr = 0x1000
-    disp = -0x2000
-    data = hex_bytes(0x48, 0x8B, 0x05) + (disp & 0xFFFFFFFF).to_bytes(4, "little") + FILLER
-    observation = dss.pool_observation(data, text_section(data, vaddr=vaddr))
-    assert observation["self_relative_loads"] == 1
-    assert observation["self_relative_into_rodata"] == 0
-
-
-def test_a_section_shorter_than_one_instruction_is_not_scanned(load_script):
-    """The loop needs eight bytes to decode a seven-byte instruction, so a stub ends cleanly."""
-    dss = load_script("dart_snapshot_strings.py")
-    data = POOL_LOAD[:6]
-    observation = dss.pool_observation(data, text_section(data))
-    assert observation["pool_loads_r15"] == 0
-    assert dss.pool_observation(b"", text_section(b""))["self_relative_loads"] == 0

@@ -14,17 +14,20 @@ AOT compilation and minification.
 
 WHAT THIS DELIBERATELY DOES NOT DO, AND WHY
 -------------------------------------------
-It does not locate the code that references a literal. That was the first version's purpose, and
-**a real Flutter target disproved the model it rested on.** Measured on a 26.8 MB `app.so` from a
-shipping application:
+It does not locate the code that references a literal, and the reason is a **withdrawn
+measurement** rather than a scope choice. An earlier version scanned `.text` for instruction shapes
+by byte pattern and reported counts -- a load through a register-held base appearing 110,641 times,
+a self-relative load appearing 5 times -- and built a mechanism on them. A real disassembler
+disproves it: byte patterns over variable-length code match *inside* operands and inside data, the
+ELF entry point here is 0 because the artifact is a shared object, and `.text` opens on zero
+padding, so there is no valid address to sweep from. Decoded at real boundaries, the writes to that
+register number **zero**.
 
-  * `mov r64, [r15 + disp32]` -- a load through a register-held pointer -- appears **110,641**
-    times in `.text`;
-  * `mov r64, [rip + disp32]` -- the position-independent load this script originally scanned for --
-    appears **5** times, and **none** of those targets lands inside the read-only data at all;
-  * the snapshot carries no relocation section, and the few 8-byte values that look like pointers
-    into the literal region are literal *data* being misread (their targets land inside strings,
-    at offsets like +3).
+The counts are gone, the mechanism claim is gone, and what remains is what can be verified without
+instruction boundaries: printable runs with their offsets, and the section layout. Locating the
+sites that use a literal needs the snapshot's own layout parsed, which needs tooling built for the
+exact release that produced the file. See `flutter-and-dart-aot.md` for the full account, including
+why the wrong model was convincing.
 
 So the reference path runs through Dart's **object pool**, reached with a register-held base, and
 a scan for self-relative address loads finds nothing. Reporting "0 references" from such a scan
@@ -42,7 +45,6 @@ Usage
     python dart_snapshot_strings.py app.so --find premium,license,vip --min-length 6
     python dart_snapshot_strings.py app.so --list --min-length 8 --limit 200
     python dart_snapshot_strings.py app.so --at 0x544550
-    python dart_snapshot_strings.py app.so --observe
     python dart_snapshot_strings.py app.so --json --find premium
 
 Exit codes: 0 = ran, 1 = nothing matched the requested filter, 2 = usage error,
@@ -191,44 +193,19 @@ def recover_strings(data, sec, min_length=6, limit=4000):
     return out
 
 
-def pool_observation(data, text):
-    """Counts that identify which family of image this is.
+def section_shape(elf):
+    """The section layout, which is how this family of image is identified.
 
-    Reported rather than used: the numbers below are the measurement behind this script's
-    docstring. A reader who sees a large pool-load count and a near-zero self-relative count knows
-    immediately that reference hunting by instruction scan will not work here, and that the pool
-    has to be parsed instead.
-
-    `[r15 + disp32]` is counted with REX.B set, because Dart keeps its pool pointer in a
-    callee-saved register and r15 is what the compiler chose on this target. A different build
-    could choose another register, so the count is evidence about *this* image, not a rule.
+    This replaced an instruction-count observation that has been withdrawn. The earlier version
+    scanned `.text` for `[r15 + disp]` shapes by byte pattern and reported large counts, then used
+    those counts as evidence for how the snapshot reaches its data. A real disassembler shows the
+    counts were artifacts: byte patterns match inside operands and inside data, and on this artifact
+    the ELF entry point is 0 with `.text` opening on zero padding, so there is no valid address to
+    sweep from. Reporting a wrong mechanism confidently was worse than reporting nothing, so the
+    measurement is gone and the shape it was standing in front of is reported instead.
     """
-    base = text['offset']
-    end = min(len(data), text['offset'] + text['size'])
-    pool_loads = 0
-    selfrel = 0
-    selfrel_into_rodata = 0
-    i = base
-    while i < end - 7:
-        b0 = data[i]
-        if b0 == 0x49 and data[i + 1] == 0x8B and (data[i + 2] & 0xC0) == 0x80:
-            pool_loads += 1
-            i += 7
-            continue
-        if 0x48 <= b0 <= 0x4F and data[i + 1] in (0x8D, 0x8B) and (data[i + 2] & 0xC7) == 0x05:
-            disp = struct.unpack_from('<i', data, i + 3)[0]
-            tva = text['vaddr'] + (i - base) + 7 + disp
-            selfrel += 1
-            if 0x200 <= tva < 0x200 + 10082704:
-                selfrel_into_rodata += 1
-            i += 7
-            continue
-        i += 1
-    return {'pool_loads_r15': pool_loads, 'self_relative_loads': selfrel,
-            'self_relative_into_rodata': selfrel_into_rodata,
-            'note': ('A large pool-load count with near-zero self-relative loads means references '
-                     'run through the object pool; instruction scanning cannot locate them, and '
-                     'the pool must be parsed with version-matched snapshot tooling.')}
+    return [{'name': s['name'], 'vaddr': hex(s['vaddr']), 'size': s['size']}
+            for s in elf.sections if s['size']]
 
 
 def main():
@@ -243,8 +220,6 @@ def main():
     ap.add_argument('--at', help='report the literal containing this file offset or vaddr')
     ap.add_argument('--min-length', type=int, default=6)
     ap.add_argument('--limit', type=int, default=4000, help='cap literals recovered per section')
-    ap.add_argument('--no-observe', action='store_true',
-                    help='skip the reference-mechanism counts (one extra pass over .text)')
     ap.add_argument('--sections', nargs='*', default=['.rodata', '.data', '.data.rel.ro'],
                     help='sections to search for literals')
     ap.add_argument('--json', action='store_true')
@@ -290,11 +265,9 @@ def main():
 
         literals = [lit for lit in literals if lit[0] <= want < lit[0] + byte_length(lit)]
 
-    observation = None if args.no_observe else pool_observation(data, text)
-
     report = {'image': args.image, 'elf': elf.describe(),
               'literals_recovered': len(literals),
-              'pool_observation': observation, 'matches': []}
+              'section_shape': section_shape(elf), 'matches': []}
 
     for off, va, text_value, enc in literals[:args.limit]:
         report['matches'].append({'offset': hex(off), 'vaddr': hex(va),
@@ -314,16 +287,9 @@ def main():
                                                     len(e['sections'])))
     print('  literals recovered  : %d   (>= %d chars, sections: %s)'
           % (len(literals), args.min_length, ', '.join(args.sections)))
-    if observation:
-        print('  reference mechanism : %d pool load(s) through r15, %d self-relative load(s)'
-              % (observation['pool_loads_r15'], observation['self_relative_loads']))
-        print('                        (%d of the self-relative loads land in .rodata)'
-              % observation['self_relative_into_rodata'])
     print()
     for entry in report['matches']:
         print('  %s  [%s]  %s' % (entry['vaddr'], entry['encoding'], entry['text'][:110]))
-    if observation:
-        print('\n  %s' % observation['note'])
     print('\n%d literal(s) reported.' % len(report['matches']))
     return 0 if report['matches'] else 1
 
