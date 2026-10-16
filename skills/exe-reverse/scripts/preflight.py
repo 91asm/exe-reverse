@@ -67,6 +67,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -461,6 +462,63 @@ def check_requirements(route, probe):
     return checks
 
 
+def host_in_use():
+    """Is somebody using this machine right now?
+
+    A dynamic route launches the target, opens windows, and may capture the screen. On a machine
+    that is in use, all three are interference: a launched window steals focus from whatever the
+    operator is doing, and a screen capture can contain their work rather than the target's -- which
+    is both a privacy problem and a useless observation.
+
+    This was learned the direct way. During one session a target was launched on a host whose owner
+    was in the middle of a full-screen game, and the capture that came back was their game, not the
+    target. Nothing was damaged, but the analysis had been adding load and taking pictures on a
+    machine someone else was using, and no part of the kit had thought to check.
+
+    Standard library only: the foreground window and the screen metrics come from the platform's own
+    interface, and a maximised window covering the whole screen is the cheap signal for "in use".
+    """
+    if os.name != 'nt':
+        return {'in_use': None, 'detail': 'not checked on this platform'}
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return {'in_use': False, 'detail': 'no foreground window'}
+        rect = ctypes.create_string_buffer(16)
+        if not user32.GetWindowRect(hwnd, rect):
+            return {'in_use': None, 'detail': 'foreground window unreadable'}
+        left, top, right, bottom = struct.unpack('<4i', rect.raw)
+        sw = user32.GetSystemMetrics(0)
+        sh = user32.GetSystemMetrics(1)
+        fullscreen = (right - left) >= sw and (bottom - top) >= sh
+        # The title is the operator's, not ours: report that there is one, never what it says.
+        return {'in_use': bool(fullscreen),
+                'detail': ('a full-screen window owns the display' if fullscreen
+                           else 'the foreground window is not full-screen'),
+                'screen': '%dx%d' % (sw, sh)}
+    except (OSError, AttributeError) as exc:
+        return {'in_use': None, 'detail': 'could not be determined: %s' % exc}
+
+
+def check_host_use():
+    """One check, worded so the reader knows what to do about it rather than only what is true."""
+    state = host_in_use()
+    if state.get('in_use'):
+        return [Check('host', False,
+                      'this machine appears to be in use: %s' % state['detail'],
+                      severity='warn',
+                      fix='do the dynamic part later, or on a machine nobody is using. Launched '
+                          'windows take focus from whoever is working, and a screen capture can '
+                          'contain their screen instead of the target -- ask before adding load '
+                          'to somebody else\'s session')]
+    if state.get('in_use') is None:
+        return [Check('host', True, 'host use not determined (%s)' % state['detail'],
+                      severity='note')]
+    return [Check('host', True, 'no full-screen window is in the foreground', severity='note')]
+
+
 def check_interference(probe):
     checks = []
     if probe.which('logman')[0]:
@@ -584,6 +642,7 @@ def main():
     checks.extend(check_sample(args.sample, args.out))
     checks.extend(check_destination(args.out, args.route, args.sample))
     checks.extend(check_requirements(args.route, probe))
+    checks.extend(check_host_use())
     checks.extend(check_interference(probe))
 
     blocks = [c for c in checks if not c.ok and c.severity == 'block']
