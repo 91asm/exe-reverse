@@ -123,6 +123,11 @@ INTENTS = {
         'reads': ['license-mechanisms.md', 'handoff-boundaries.md', 'network-activated-licensing.md',
                   'patching.md', 'integrity-checks.md', 'verification.md'],
         'ask': [
+            'Where does the FEATURE run, as distinct from where the permission comes from? A gate '
+            'whose work happens on this machine is reachable from this machine whatever issued the '
+            'entitlement, and mistaking a remote permission for a remote feature ends an analysis '
+            'that could have continued. The two questions are answered separately in '
+            'license-mechanisms.md, with the four combinations and what each one reaches.',
             'Is the decision made on this machine at all? Classify that first: a client-side flag, '
             'a value the client renders but the server decides, and a server-authoritative '
             'entitlement need three different answers and only the first is a patch.',

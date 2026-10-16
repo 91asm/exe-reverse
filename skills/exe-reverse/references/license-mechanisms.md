@@ -105,6 +105,36 @@ Both sentences can be true at once, and that combination is the one that produce
 artifact. A client that skips its own check and then requests a resource it is not entitled to will
 display an unlocked-looking shell and empty content.
 
+## The question those two sentences do not ask
+
+They classify where the **permission** comes from. They do not ask where the **feature runs**, and
+conflating the two produces a classification that is wrong in the pessimistic direction -- the more
+expensive way to be wrong, because it ends an analysis that could have continued.
+
+A feature whose work happens on the machine is reachable from the machine, whatever issued the
+permission. Renaming a saved folder, deleting a stored entry, enabling a local option: the server's
+part in these is to say *who may*, and the client's part is to *carry it out*. The client still has
+to read the entitlement and act on it, and both of those are local.
+
+| Permission comes from | Feature runs | What a local change reaches |
+|---|---|---|
+| the client's own data | on the machine | the feature, and the change persists |
+| the server, handed to the client | on the machine | the feature, until the client asks again -- understand the re-ask before promising durability |
+| the server, enforced per request | on the server | nothing. The client cannot make the server agree |
+| the server, cached by the client | on the machine | the feature, and the cache's validator becomes the real subject: if a signature is what makes a value acceptable, the route is "understand what makes a value acceptable", not "patch the value" |
+
+**The mistake this table exists to prevent**, recorded because it was made here and then corrected:
+a target was classified server-authoritative from its endpoint names and a server-issued tier value,
+and the features behind those gates -- every one of them a local operation -- were reported as out of
+reach. The permission was remote. The features were not. Those are two different sentences, and only
+the second decides what a client-side change can do.
+
+**What remains true, and belongs in the same breath:** a change to a server-issued entitlement
+changes the client's *belief*. Where the entitlement is re-asked, that belief is a cache with a
+lifetime. Where the feature needs something only the server can supply, the belief buys nothing.
+Both are findings about the client, and neither is a reason to stop before asking where the feature
+runs.
+
 ## Where the licence lives, and why an edit sometimes reverts
 
 - **A file** in the install directory, the roaming or local application data tree, or a shared
