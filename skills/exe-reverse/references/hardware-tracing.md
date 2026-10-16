@@ -282,6 +282,46 @@ instruction-level trace of a kernel mechanism.
 | What value was compared | A data breakpoint on the address, or the algorithm | No trace records values; the trace gives the address, then you read the value |
 | The code is generated or self-modified while it runs | Expect decoding to fail; fall back to a dump plus static reading | The decoder needs the exact bytes that ran |
 
+## What was measured about hardware breakpoints on the development host
+
+The architectural facts above say the facility exists. Whether an exception raised by a debug register
+reaches a debugger **on a given machine** is a separate question, and this repository ran the
+measurement rather than inferring it. The record is partial, and it is written as partial.
+
+`observed`, on the host described in `evidence/` (a 12th-generation part, with a virtualisation layer
+reporting itself present):
+
+| Step | Result |
+|---|---|
+| activate the debugging privilege on the token | succeeded -- and it was needed: an elevated session alone got `ERROR_ACCESS_DENIED` |
+| start the subject under the debugger | succeeded; 33 debug events, two of them of the exception class |
+| write `Dr0` with the address of a function called in a hot loop, and `Dr7` to enable slot 0 | **accepted** -- the context write returned success and the register read back |
+| wait for the exception | **never arrived** |
+
+**What that combination does and does not establish.** It rules out the two cheapest explanations:
+the register was not rejected, and the address was a live one. What is **not** established is the
+cause, because the control that would separate them did not complete -- a software breakpoint on the
+same function, which would show that this session can receive debug exceptions at all. Without it,
+"the register is intercepted" and "something else in this setup is wrong" remain indistinguishable.
+The honest statement is therefore: the exception did not arrive, on a host with a virtualisation layer
+present, with the cause `unknown`.
+
+**Three implementation errors were made before either fact could be measured**, and they are worth
+listing because each one produced a plausible negative:
+
+1. a debug-event structure read at the wrong offset -- the union inside it is 8-byte aligned, so the
+   exception code sits at 16 rather than 12, and the wrong read yielded zero, which matched no code
+   and was silently treated as an event of no interest;
+2. a breakpoint on the start of the code section rather than on a function, which is an address the
+   running program may never execute;
+3. a breakpoint on a function that runs once, at process start, which the process had already passed
+   by the time the register was written.
+
+**All three looked like an environment property and all three were arithmetic.** A measurement of
+"does this mechanism work here" has to demonstrate that the mechanism was actually attempted before
+its silence can be read as a property of the machine; otherwise the cheapest bug in the harness gets
+recorded as a finding about the host.
+
 ## What this file does not cover
 
 `unknown`: nothing in this file was measured on this host. It is documentation-derived, and these
