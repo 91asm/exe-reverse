@@ -1,0 +1,40 @@
+# Normalise line endings so a Windows checkout and a POSIX CI runner agree.
+# Everything text is stored with LF; only the files that Windows shells actually execute
+# keep CRLF, because a .bat or .ps1 with LF endings is a class of failure nobody enjoys.
+* text=auto eol=lf
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.ini   text eol=lf
+*.cfg   text eol=lf
+*.svg   text eol=lf
+*.txt   text eol=lf
+*.js    text eol=lf
+*.c     text eol=lf
+*.h     text eol=lf
+
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary: never diff, never normalise, never attempt a merge.
+*.exe  binary
+*.dll  binary
+*.sys  binary
+*.bin  binary
+*.dmp  binary
+*.pdb  binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.gif  binary
+*.zip  binary
+*.gz   binary
+
+# Generated diffs are noise: the lockstep files below are large, mechanical, and read by
+# tooling rather than by a reviewer.
+package-lock.json  -diff linguist-generated

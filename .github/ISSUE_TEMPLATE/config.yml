@@ -1,0 +1,6 @@
+# Issue-form configuration.
+#
+# Blank issues are disabled on purpose. An issue opened here without the structured form usually
+# lacks the two things a maintainer cannot reconstruct afterwards: the host facts, and the strength
+# of the evidence. Both are fields in the forms under this directory.
+blank_issues_enabled: false

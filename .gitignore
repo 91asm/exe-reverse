@@ -1,0 +1,130 @@
+# Repository ignore rules.
+#
+# Two jobs, and the second is the one that matters: this tree is a *method*, and it must
+# never carry a target. Samples, dumps, captured memory, licence material and keys are all
+# things that appear naturally while working and must never be committed.
+
+# --- build and bytecode ------------------------------------------------------
+*.class
+*.jar
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+!skills/exe-reverse/scripts/**/*.c
+
+# --- analysis artifacts: never commit a target or a capture of one -----------
+# A sample, a dump or an extracted payload is data about someone else's software.
+*.exe
+*.dll
+*.sys
+*.ocx
+*.cpl
+*.scr
+*.drv
+*.efi
+*.msi
+*.msp
+*.msix
+*.appx
+*.bin
+*.dat
+*.dump
+*.dmp
+*.core
+*.raw
+*.mem
+*.img
+*.vhd
+
+# --- reverser databases and tool state --------------------------------------
+*.idb
+*.i64
+*.til
+*.nam
+*.unp
+*.map
+*.rep
+*.asm
+*.lst
+
+# --- licence material and credentials ---------------------------------------
+# The point of the skill is to classify a mechanism, never to ship a key.
+*.lic
+*.licence
+*.license
+*.key
+*.pfx
+*.p12
+*.snk
+*.pem
+*.der
+*.crt
+*.jks
+*.keystore
+*.kdbx
+*.kdb
+
+# --- captures ---------------------------------------------------------------
+*.pcap
+*.pcapng
+*.saz
+*.har
+*.etl
+*.etlx
+*.trace
+*.jsonl
+
+# --- local scratch ----------------------------------------------------------
+_tmp/
+out/
+work/
+audit_out/
+exports/
+samples/
+captures/
+*.log
+
+# The workbench: vendored toolchains, unpacked samples, dumps, scratch notes. Nothing under
+# tools/ belongs to the repository -- the skill's own evidence record lives in
+# docs/tool-verification/ and carries no target identity or vendored binaries.
+tools/
+
+# Local copies of third-party write-ups that a research pass reads. They are someone else's
+# text, not content of this repository: what ships is the absorbed method under a stated
+# strength label. One `git add -A` is all it would take to commit them, so the rule is
+# explicit here rather than resting on "nobody has added them yet".
+.ref/
+_recon/
+*.orig
+*.rej
+
+# sandbox installs made while testing `npx skills add .` against this repo
+.claude/
+.agents/
+.opencode/
+.cursor/
+
+# --- python and editors -----------------------------------------------------
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- generated --------------------------------------------------------------
+# Screenshots are evidence while a task runs and are never part of the tree; the text of what
+# they show belongs in the record instead.
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif

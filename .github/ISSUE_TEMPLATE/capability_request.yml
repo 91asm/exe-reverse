@@ -1,0 +1,64 @@
+name: Capability request
+description: Ask this repository to cover a capability it does not have yet, naming the artifact class, the delivery form you need, and the dependency the route would require.
+title: "[capability] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A capability is not added by writing a reference file for it. Three things have to land
+        together: the dependency is named, the grade is chosen honestly, and the coverage table in
+        `skills/exe-reverse/references/coverage-and-limits.md` states what is covered and what is
+        not. This form collects what a maintainer needs to decide whether the route is reachable at
+        all.
+
+        Describe the target as a class. No product name, version string, vendor, file name or
+        digest: those identify one artifact, and the lesson transfers without them.
+
+  - type: dropdown
+    id: form
+    attributes:
+      label: Which deliverable form do you need?
+      description: Four forms are common, they are not ranked, and "verified" means something different for each. "In-memory patch" also covers a live hook, and "written report" means an analysis with a stated boundary.
+      options:
+        - A patched on-disk binary
+        - A live in-memory patch or a hook
+        - A standalone key generator
+        - An analysis report with a stated boundary
+        - More than one, or undecided
+    validations:
+      required: true
+
+  - type: textarea
+    id: target-class
+    attributes:
+      label: Target class
+      description: What kind of artifact, what kind of check or mechanism, and what kind of protection, described as a class rather than named. If the mechanism is unknown, say what you have observed that suggests a class.
+      placeholder: e.g. a native x64 PE whose licence decision is repeated at every feature entry, no packer visible, tick count checked during startup
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependency
+    attributes:
+      label: What the route would need
+      description: "Everything the route depends on that this repository does not ship: a debugger, a trace capture path, a signing path, a second machine, a hypervisor, an account, a purchase, a specific processor feature. \"Nothing beyond Python\" is a valid answer and a strong one."
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What you have already tried, and what stopped it
+      description: The nearest existing route, and the measurement or condition that stopped it. A route blocked by a named condition is more useful than a route nobody attempted.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: acknowledgement
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I understand that an unrun route lands in the coverage table as `unverified` with the missing dependency named, not as documented fact.
+          required: true
+        - label: I have not included target identity, licence material or personal data.
+          required: true

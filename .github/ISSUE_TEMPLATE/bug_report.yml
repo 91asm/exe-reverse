@@ -1,0 +1,93 @@
+name: Bug report
+description: A script, gate, reference or documented command in this repository is wrong, fails, or contradicts another part of the repository.
+title: "[bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a defect in this repository: a script that fails, a documented command
+        that does not run, a gate that reports the wrong thing, or two files that contradict each
+        other.
+
+        Do not paste a target's identity: no product name, version string, licence value, endpoint,
+        or path containing an account name. Describe the class of artifact instead, and redact the
+        rest. Placeholders such as `<pe>`, `<rva>` and `<sha256>` are expected here.
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The command you ran
+      description: Exactly as written, including the working directory it was run from.
+      render: shell
+      placeholder: python check_refs.py
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What you observed
+      description: The decisive lines of output or file content, not a summary of them. If a gate reported a finding, paste the finding line.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead, and what states that
+      description: "Name the file that establishes the expectation: a reference, a docstring, the README, or the script's own argument table."
+    validations:
+      required: true
+
+  - type: input
+    id: os-build
+    attributes:
+      label: Host OS build
+      description: The build number, not the product name. On Windows the registry `ProductName` can read "Windows 10" on a Windows 11 host.
+      placeholder: e.g. Windows 11 build 26100
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hypervisor
+    attributes:
+      label: Is a hypervisor present on this host?
+      description: A hypervisor changes what a debugger and a hardware breakpoint can do, so a failure can belong to the host rather than to the script. `python skills/exe-reverse/scripts/hwprobe.py` reports this.
+      options:
+        - "Yes"
+        - "No"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Relevant tool and interpreter versions
+      description: The interpreter, and any tool the failing route depends on. "Not installed" is a useful answer.
+      placeholder: e.g. Python 3.14.0, pytest 8.4.1, no debugger installed
+    validations:
+      required: true
+
+  - type: dropdown
+    id: grade
+    attributes:
+      label: Strength of the evidence you are reporting
+      description: observed = you ran the command and have the output; inferred = you reasoned from something you did read; unverified = you are reporting it from elsewhere and have not reproduced it.
+      options:
+        - observed (a command and its output exist)
+        - inferred (reasoned from an observation)
+        - unverified (not reproduced here)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: This report contains no target identity, licence material or personal data.
+          required: true
+        - label: I searched the failure catalogue (`skills/exe-reverse/references/pitfalls.md`) for this shape of failure.
+          required: false

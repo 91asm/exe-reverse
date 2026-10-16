@@ -1,0 +1,72 @@
+name: Route proposal
+description: Propose a route for the reference library, with the mechanism it rests on, what it requires, what it explicitly does not cover, and how someone would falsify it.
+title: "[route] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A route is a procedure plus its conditions. State the mechanism, because a procedure without
+        a mechanism cannot be adapted when the target differs, and state the falsifier, because a
+        claim whose falsifier cannot be written is an impression.
+
+        If you have run this route, say so and paste the command and its output. If you have not,
+        say that too: an unrun route is `unverified`, and saying so is not hedging.
+
+  - type: input
+    id: route
+    attributes:
+      label: The route, in one line
+      description: "The decision rule, not the tool: what you reach for, and the condition that selects it."
+      placeholder: e.g. locate the gate by watching the value that reaches the comparison, not by searching its string
+    validations:
+      required: true
+
+  - type: textarea
+    id: mechanism
+    attributes:
+      label: The mechanism it rests on
+      description: "Why the route works, in terms of documented behaviour: file format, loader semantics, processor architecture, or the target's own structure. Name the source you read if it is external."
+    validations:
+      required: true
+
+  - type: textarea
+    id: requires
+    attributes:
+      label: What it requires
+      description: Host, privilege, tooling, capture path, signing, sample access, or a second machine. Name the dependency that this repository does not ship.
+      placeholder: e.g. a user-mode debugger; no instruction-trace capture path is needed
+    validations:
+      required: true
+
+  - type: textarea
+    id: not-covered
+    attributes:
+      label: What it explicitly does not cover
+      description: The target shapes and conditions where this route gives a wrong or useless answer, stated in the same voice as what it can do. This is what stops the route being applied to a target it was not written for.
+    validations:
+      required: true
+
+  - type: textarea
+    id: falsifier
+    attributes:
+      label: How someone would falsify it
+      description: The observation that would show the route does not work, and the control that separates the route's failure from a host or toolchain failure.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: What you ran, if anything
+      description: The command, its output, and where the output now lives. If nothing was run, write "not run" and leave it at that.
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: acknowledgement
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I have not included target identity, licence material or personal data.
+          required: true
