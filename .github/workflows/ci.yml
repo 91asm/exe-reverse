@@ -59,6 +59,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install test dependencies
+        shell: bash
         # `tiktoken` is optional for the suite but not for the budget gate's *measurement*: without
         # it, `check_budget.py` falls back to characters/constant, and the two paths must agree.
         # Installing it here means CI exercises the real tokenizer path, and the unit test comparing
@@ -77,6 +78,7 @@ jobs:
         run: python check_budget.py
 
       - name: Structural gate - documented commands (if present)
+        shell: bash
         run: |
           if [ -f check_commands.py ]; then
             python check_commands.py
@@ -91,6 +93,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Summarise skipped and expected-failure coverage
+        shell: bash
         if: always()
         run: python -m pytest -q -ra --no-header -p no:cacheprovider 2>&1 | tail -n 40
 
