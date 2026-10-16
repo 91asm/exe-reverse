@@ -92,7 +92,7 @@ captures/
 # docs/tool-verification/ and carries no target identity or vendored binaries.
 tools/
 
-# Local scratch: **any** top-level underscore-prefixed directory is a work area, not content.
+# Local scratch: **any** top-level underscore-prefixed path is a work area, not content.
 #
 # This is a pattern rather than a list on purpose. An explicit list is how a research directory
 # reached the staging area once: the directory names are chosen by whatever the research needed,
@@ -100,7 +100,13 @@ tools/
 # remember. Measured: one such directory carried 37.5 MB of third-party sources, a crash dump and
 # a build artefact with a developer's home path inside it, all one `git add -A` away from being
 # committed to this repository.
-/_*/
+#
+# The pattern covers files as well as directories, and it had to be taught that twice: it was
+# first written as `/_*/`, which matches only directories, and two scratch FILES -- one carrying
+# the current target's name and its measured addresses -- rode one `git add -A` into a commit.
+# The underscore convention is about intent ("this is mine and temporary"), and a rule that
+# enforces it for directories but not files enforces it by accident of shape.
+/_*
 *.orig
 *.rej
 
