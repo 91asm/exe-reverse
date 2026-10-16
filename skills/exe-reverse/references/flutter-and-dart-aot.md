@@ -138,11 +138,26 @@ reporting is the judge rather than the 66 call sites.
 
 **What is settled here and what is not.** Settled: the gates are client-side, there are 66 of them,
 they share one decision function, and the mechanism is a boolean whose tag bit selects between the
-ordinary path and a message. Settled by independent evidence: the thread slot at `0x78` holds the
-false constant, because the shape "compare against null, then load that slot" -- the compilation of
-`x ?? default` -- occurs 1,087 times against 146 for the other slot, and a boolean field defaulting
-to false is the ordinary reading while defaulting to true is the rare one. Not settled: that a
-patched build behaves, which needs a run.
+ordinary path and a message. Not settled by static reading: that a patched build behaves, which needs
+a run.
+
+**A statistic was used to settle the slot, and the authoritative table overturned it.** The inference
+looked reasonable: the shape "compare against a slot, then load another slot" is how a null-coalescing
+default compiles, one slot appeared in that shape 1,087 times against 146 for the other, and a boolean
+field defaulting to false is the ordinary reading -- so `0x78` was reported as the false constant.
+The snapshot front end's own thread-field table, which it validates against the language runtime's
+source, says otherwise: the slots at 0x70, 0x78 and 0x80 are `object_null`, `bool_true` and
+`bool_false`, and the slot the code compares against is `field_table_values`, not null at all.
+
+**The reading survives; the reasoning for it does not.** The judge is loaded from `0x78`, which the
+table names `bool_true`, so the change makes it return true rather than false -- the same conclusion
+arrived at by the wrong route. Two lessons, and the second is the one worth keeping:
+
+- a frequency argument over disassembly can point the right way and still be the wrong argument, so
+  it may support a decision but cannot be the record of one;
+- a runtime field table shipped by a front end that validates it against the runtime's own source is
+  cheaper to consult than a statistical argument is to construct, and it should have been the first
+  step rather than the correction.
 
 **Reading a disassembly is not reading bytes, and the difference cost a wrong edit here.** The
 listing rendered the decisive instruction as `JNE .+9`, which reads like a two-byte short jump. The
@@ -158,7 +173,7 @@ catches this is cheap and is worth stating as a step rather than a caution:
 4. write to a **copy**, re-read the bytes from the written file, and compare the two hashes.
 
 **The candidate edit, and its exact scope.** Six bytes at `0xC0AC37` become six no-ops, so the judge
-falls through to the false constant and all 66 callers take the ordinary path. It is one instruction
+falls through to the true constant and all 66 callers take the ordinary path. It is one instruction
 in one function, equal-length, and it changes nothing about the gates themselves -- if the reading of
 the mechanism is wrong, the result is a build that still gates, not a build that broke elsewhere.
 **What the patch is not is verified**: it is a file that differs in six bytes, and the difference
