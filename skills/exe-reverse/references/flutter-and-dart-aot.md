@@ -138,11 +138,31 @@ reporting is the judge rather than the 66 call sites.
 
 **What is settled here and what is not.** Settled: the gates are client-side, there are 66 of them,
 they share one decision function, and the mechanism is a boolean whose tag bit selects between the
-ordinary path and a message. Not settled: which of the two boolean constants the thread structure
-holds at `0x70` and `0x78` is `true`, because that is a runtime value and a static read of the
-constants' addresses does not tell them apart. Anyone acting on this should expect to settle that
-with one run, not by reading further -- and should treat the located branch as a branch, not as a
-verified result, until `verification.md`'s conditions are met on a build that actually runs.
+ordinary path and a message. Settled by independent evidence: the thread slot at `0x78` holds the
+false constant, because the shape "compare against null, then load that slot" -- the compilation of
+`x ?? default` -- occurs 1,087 times against 146 for the other slot, and a boolean field defaulting
+to false is the ordinary reading while defaulting to true is the rare one. Not settled: that a
+patched build behaves, which needs a run.
+
+**Reading a disassembly is not reading bytes, and the difference cost a wrong edit here.** The
+listing rendered the decisive instruction as `JNE .+9`, which reads like a two-byte short jump. The
+bytes at that offset are `0F 85 09 00 00 00` -- a **six-byte** `JNE rel32`. The listing does not
+print instruction lengths, so the two are indistinguishable on the page, and an edit prepared from
+the listing alone would have overwritten four bytes of the following instruction. The habit that
+catches this is cheap and is worth stating as a step rather than a caution:
+
+1. map the virtual address to a file offset from the section table, rather than assuming the two are
+   equal (they are here, which is a property to read, not to assume);
+2. read the bytes at that offset and compare them against what the disassembly claimed;
+3. prepare an **equal-length** replacement, so nothing after the site shifts;
+4. write to a **copy**, re-read the bytes from the written file, and compare the two hashes.
+
+**The candidate edit, and its exact scope.** Six bytes at `0xC0AC37` become six no-ops, so the judge
+falls through to the false constant and all 66 callers take the ordinary path. It is one instruction
+in one function, equal-length, and it changes nothing about the gates themselves -- if the reading of
+the mechanism is wrong, the result is a build that still gates, not a build that broke elsewhere.
+**What the patch is not is verified**: it is a file that differs in six bytes, and the difference
+between that and a working unlock is exactly what `verification.md` exists to measure.
 
 **Report the finding in the right shape.** "The client decides, the gate is local, and the decision
 is one small function" is the deliverable here, and it is what makes the earlier classification
