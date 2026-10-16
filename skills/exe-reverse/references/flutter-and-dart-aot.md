@@ -111,11 +111,38 @@ CALL  stub_b66578              ; a single shared "show it and return" routine
 RET
 ```
 
-The judge is 120 bytes: it reads a field off its argument, compares against two constants in the
-isolate's heap, and returns one of them. **That is the leverage** -- one function decides for every
-gate, so the finding is the judge, not the four call sites. The call sites agree on the jump
-displacement and on the shared display routine, which is what makes the pattern countable rather than
-anecdotal.
+**The population, not the anecdote.** One gate read by hand is a single site. The whole snapshot was
+counted from the emitted disassembly, and the count is what makes the shape a mechanism rather than a
+coincidence (`observed`):
+
+| Measurement | Result |
+|---|---|
+| disassembly files scanned | 74,547 |
+| functions containing a tag test at all | **6,530** |
+| of those, `TEST AL,0x10` + `JE` | 3,247 |
+| functions containing the full `judge → test → display` chain | **66** |
+| functions mentioning the judge but not the display (or the reverse) | 0 |
+
+**The first row is the trap, and it is why the count had to be run before anything was proposed.**
+`TEST AL, 0x10` appears 13,625 times across 6,530 functions, because it is simply how this compiler
+tests a boolean -- not a licence shape at all. A change to that instruction would have broken every
+boolean comparison in the program rather than unlocking anything, and a hand-read single site would
+have suggested exactly that change. What is specific to the gates is the **chain**: the judge, then
+the test, then the one shared display routine, present in 66 functions and absent everywhere else.
+
+**The judge is the leverage, and it is 120 bytes.** All 66 gates reach the decision through one
+function, which delegates once more and finally applies a single `XOR RCX, 0x10` -- in this ABI the
+two boolean objects sit `0x10` apart, so that instruction *is* a logical negation, and it is the same
+bit the callers test. One function therefore decides for every gate, which is why the finding worth
+reporting is the judge rather than the 66 call sites.
+
+**What is settled here and what is not.** Settled: the gates are client-side, there are 66 of them,
+they share one decision function, and the mechanism is a boolean whose tag bit selects between the
+ordinary path and a message. Not settled: which of the two boolean constants the thread structure
+holds at `0x70` and `0x78` is `true`, because that is a runtime value and a static read of the
+constants' addresses does not tell them apart. Anyone acting on this should expect to settle that
+with one run, not by reading further -- and should treat the located branch as a branch, not as a
+verified result, until `verification.md`'s conditions are met on a build that actually runs.
 
 **Report the finding in the right shape.** "The client decides, the gate is local, and the decision
 is one small function" is the deliverable here, and it is what makes the earlier classification
