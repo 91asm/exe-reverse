@@ -80,12 +80,48 @@ counts were measuring the scanner, not the image.
 which needs no instruction boundaries and can be checked by eye. Every claim about *which code*
 references a literal is withdrawn, and the tool no longer reports one.
 
-**What would be needed.** Reference sites require the snapshot's own layout parsed, which means
-tooling built for the exact release that produced the file. `observed`: the release here is **3.3.4**,
-read from the companion executable's runtime string rather than from the stripped payload, which
-carries no version at all. State the boundary instead of working around it -- "the literals name the
-feature and its vocabulary; the code that reads them is not reachable with what is installed here" is
-a true, useful report, and it is the one this file supports.
+**What it would be needed, and what was actually done.** Reference sites require the snapshot's own
+layout parsed by tooling built for the release that produced it. `observed`: **this was reached**, and
+the route is reproducible:
+
+| Step | Command or artifact | Result |
+|---|---|---|
+| identify the release | the companion executable's runtime string | `3.3.4` |
+| obtain a front end | a pure-Go static analyzer published with checksummed release archives; `sha256` verified against the published sums before running | 7.3 MB, no toolchain needed |
+| confirm it fits | its own diagnostic subcommand | `Snapshot: OK`, `Pointers: uncompressed (8 bytes)`, features include `x64 windows` |
+| run the pipeline | full analysis, 26.8 MB input | **76,477 functions, 10,102 classes**, 300 s |
+| locate sites | `string_refs.jsonl` (99,504 entries, each naming function, `pc`, pool index and value) | every gate message and endpoint resolved to a function |
+
+**Two corrections that this step forces on the earlier text.** The diagnostic reports
+**`uncompressed (8 bytes)`** pointers and lists `no-compressed-pointers` among the build features, so
+the "4-byte compressed pointer" model was not merely unverified but wrong in its premise. And the same
+diagnostic prints a Dart version that is a **structural profile label rather than the SDK version** --
+its number and the executable's runtime string disagree, which is a documented property of that tool,
+so the version used for any VM-compiling step must come from the banner, never from the profile label.
+
+**What the located sites look like.** Four gate functions that carry the feature-gate messages share
+one shape, with only the message's pool offset differing (`observed`, from the emitted disassembly):
+
+```
+CALL  stub_2645ec              ; the judge: returns a bool object
+TEST  AL, 0x10                 ; that object's tag bit
+JE    0x…                    ; tag clear  -> the ordinary path, the feature runs
+MOV   R11, [R15+0x7c0ff]       ; tag set    -> load the message
+CALL  stub_b66578              ; a single shared "show it and return" routine
+RET
+```
+
+The judge is 120 bytes: it reads a field off its argument, compares against two constants in the
+isolate's heap, and returns one of them. **That is the leverage** -- one function decides for every
+gate, so the finding is the judge, not the four call sites. The call sites agree on the jump
+displacement and on the shared display routine, which is what makes the pattern countable rather than
+anecdotal.
+
+**Report the finding in the right shape.** "The client decides, the gate is local, and the decision
+is one small function" is the deliverable here, and it is what makes the earlier classification
+question answerable with evidence instead of argument. What must not be claimed from a static read
+alone is that a patched build behaves: the artifact's own integrity expectations, and any second
+check, are separate questions. See `verification.md` before treating a located branch as a result.
 
 ## Locating behaviour: what works, and in what order
 
