@@ -90,6 +90,58 @@ a true, useful report, and it is the one this file supports.
 ## Locating behaviour: what works, and in what order
 
 1. **Extract the installer first.** Everything below operates on the payload, and the payload is
+   what the snapshot sits inside.
+2. **Confirm the shape.** `scripts/dart_snapshot_strings.py <snapshot>` prints the section layout,
+   and the layout is the identification: a very large code section, a large data section, a symbol
+   table measured in bytes, and an unwinding table that is a stub. Nothing needs disassembling to
+   see it, which matters because the disassembly is the part that cannot be trusted here.
+3. **Recover literals and search them.** This is the step that produces real leads, because a string
+   literal survives both AOT compilation and minification while names do not. It finds *printable
+   runs* rather than parsed strings, so treat each hit as a lead with an offset.
+4. **Read the literals as a map, not as a verdict.** On the measured target one search returned the
+   three feature-gate messages, an account endpoint, a purchase flag, an upgrade-page route and a
+   parse routine's name. That is enough to write a plan, and not enough to make a claim: the
+   literals say the feature exists and what the product calls it.
+5. **Do not expect another platform's tooling to finish the job.** Measured above: the Android
+   reader for the same snapshot family returns nothing usable on this artifact. Borrow tools as
+   hypotheses and count their output on one file before planning around them.
+6. **What locating the referencing code needs.** The snapshot's own layout parsed by tooling built
+   for the exact release that produced it. `observed`: the release here is **3.3.4**, read from a
+   companion executable's runtime string because the stripped payload carries no version at all.
+   Until that exists, the honest position is the one in the next section.
+
+
+
+A reasonable next move is to borrow the Dart tooling written for Android's `libapp.so`: same
+compiler, same snapshot family, so the readers should apply. **Measured, they do not**, and the
+comparison is worth recording because it is cheap to re-run and expensive to assume.
+
+The tool in question parses the snapshot's string framing directly -- entries shaped
+`[tag][payload]` with the length in the tag -- and it is pure Python with no external dependency, so
+it ran against this artifact unchanged (`observed`):
+
+| Measurement | Result on a Windows payload | Its own record on an Android payload |
+|---|---|---|
+| candidates found | **146** | thousands; its reference case cites 4,241 strings shared with a decompiler listing |
+| of those, forming a run of three or more | **0** | the normal case |
+| after reading the 146 isolated candidates | all noise: ` !ӁrBO`, `yQÜxQÜwQÜuQ`, `DDDDDDDDDD` | genuine literals |
+
+So the framing this tool relies on is not the framing this artifact uses. The layouts differ, and
+"same language, same snapshot family" is not the same statement as "same container".
+
+**What did work on this artifact** was the crude method: scanning the data sections for printable
+runs, which recovered eight complete literals the framed parser never surfaced -- including the
+three feature-gate messages and an account endpoint. The honest description of that method is that
+it finds *printable runs*, not *Dart strings*: it has no notion of framing, so its output must be
+read rather than trusted, and a hit is a lead with an offset rather than a parsed value.
+
+**The transferable rule.** A tool written for one platform's copy of a shared format is a hypothesis
+about the other platform, not a capability. Test it on one file and count the results before
+building a plan on it -- the cost is one command, and the failure mode otherwise is a tool that
+runs, exits zero, and returns nothing, which reads as "there is nothing there" rather than "this
+reader does not fit this file".
+
+1. **Extract the installer first.** Everything below operates on the payload, and the payload is
    what `app.so` is inside.
 2. **Confirm the shape.** `scripts/dart_snapshot_strings.py app.so` prints the section layout, and
    the layout is the identification: a very large code section, a large data section, a symbol table
@@ -112,6 +164,37 @@ a true, useful report, and it is the one this file supports.
 6. **Watch the version boundary.** A snapshot is produced by one Dart release and the tooling must
    match it. `flutter --version` from the payload, or the engine's own version string, is the
    input; a mismatched parser fails in ways that look like a corrupted file.
+
+## The Android tooling does not transfer, measured
+
+A reasonable next move is to borrow the Dart tooling written for Android's payload image: same
+compiler, same snapshot family, so the readers should apply. **Measured, they do not**, and the
+comparison is cheap to re-run and expensive to assume.
+
+The tool in question parses the snapshot's string framing directly -- entries shaped `[tag][payload]`
+with the length carried in the tag -- and it is pure Python with no external dependency, so it ran
+against this artifact unchanged (`observed`):
+
+| Measurement | Windows payload | Its own record, Android payload |
+|---|---|---|
+| candidates found | **146** | thousands; its reference case cites 4,241 strings shared with a decompiler listing |
+| candidates forming a run of three or more | **0** | the normal case |
+| reading the 146 isolated candidates | all noise: ` !ӁrBO`, `yQÜxQÜwQÜuQ`, `DDDDDDDDDD` | genuine literals |
+
+So the framing that tool relies on is not the framing this artifact uses. The layouts differ, and
+"same language, same snapshot family" is not the same statement as "same container".
+
+**What did work here** was the crude method: scanning the data sections for printable runs, which
+recovered eight complete literals the framed parser never surfaced -- the three feature-gate
+messages and an account endpoint among them. Its honest description is that it finds *printable
+runs*, not *parsed strings*: it has no notion of framing, so a hit is a lead with an offset and must
+be read rather than trusted.
+
+**The transferable rule.** A tool written for one platform's copy of a shared format is a hypothesis
+about the other platform, not a capability. Test it on one file and count its output before building
+a plan on it. The cost is one command; the failure mode otherwise is a tool that runs, exits zero and
+returns nothing, which reads as "there is nothing there" rather than "this reader does not fit this
+file".
 
 ## What cannot be done from the file alone
 
