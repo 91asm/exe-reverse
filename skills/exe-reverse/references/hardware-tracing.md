@@ -333,6 +333,41 @@ advice stands and now has evidence behind it: the routes that survive are the on
 not mediated by the layer, and the honest fallback is a software breakpoint, which pays exactly the
 cost the hardware one was chosen to avoid.
 
+## What was measured about reaching the trace unit on the development host
+
+The probe reports that the processor supports tracing. Whether a trace can be **collected** is a
+separate question, and on this platform the answer has a shape that is worth stating precisely: it is
+not that no interface exists, it is that the interface is undocumented. Measured on the host
+described in `evidence/` (`observed`):
+
+| Check | Result |
+|---|---|
+| does the system's own recorder offer a trace profile | **no** -- thirty profiles listed, none for the trace unit; they are CPU, DiskIO, Heap, Pool, GPU and similar |
+| is there an in-box driver for the facility | **yes** -- a Microsoft-signed kernel driver, current build, `DEMAND_START` |
+| does it create a device | **yes** -- its own strings name `\Device\IPT` and the user-mode path `\DosDevices\IPT` |
+| does it look driven by a control request | **plausible** -- the same strings carry option-shaped names (`IptOption`, `IptTraceUntil`, `IptNumTries`, `IptIgnoreCheck`) and a ToPA mapping failure path with a parameter-count constraint |
+| is the device reachable here | **no** -- the driver is stopped, so the path does not resolve |
+| does anything else already use it | **yes, in-box** -- a WMI autologger is registered against it, which is the platform collecting traces for its own crash analysis |
+
+**What follows, and what does not.** What follows is that the constraint is not the CPU and not the
+absence of a path: a device object with a user-mode name implies a handle-based control path, and
+option-shaped strings imply a request structure the driver reads. What does **not** follow is that
+this path is usable for analysis. It is undocumented, its request layout is unknown, the driver is
+stopped, and `hardware breakpoints` measured on this same host showed the broader caution: a
+facility the architecture provides and an API accepts can still fail to deliver, because a
+virtualisation layer sits between. The two closed doors are therefore different kinds of closed --
+one is "no interface", the other is "an interface nobody documented".
+
+**The honest next step is small and testable, on a machine nobody is using**: start the driver and
+enumerate the device's control codes, or find the in-box caller and read how it drives them. Neither
+is done here. **Loading an undocumented kernel driver to test a hypothesis about trace collection is
+not a step to take on a host somebody else is working on**, and the pre-flight now checks for exactly
+that situation before a dynamic route is planned.
+
+**The alternatives that are documented stay the recommendation**: a recorded replay, which is
+documented and user-mode; a coarser sampling facility, which answers a different question but answers
+it; or a different platform, where the collection interface is documented in the first place.
+
 ## What this file does not cover
 
 `unknown`: nothing in this file was measured on this host. It is documentation-derived, and these
