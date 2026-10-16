@@ -226,6 +226,27 @@ inputs and a bounded execution can be run rather than understood. When the deliv
 the interpreter with instrumented state is legitimate work; when the deliverable is the algorithm, the
 interpreter has to be lifted.
 
+## What a proof of the reduction is worth, measured
+
+The kit's reducer ends a reduction with sampling and says so: sampling refutes, it does not prove. With
+an external solver named on the command line, the same run now asks the solver for an input that
+distinguishes the two forms, and the statement changes with the answer. Measured on this host
+(`observed`):
+
+| Question put to the solver | Answer | What the run may then claim |
+|---|---|---|
+| the classic substitution chain against its reduction, at 32 bits | no distinguishing input exists | **equivalent for every input at that width** -- a proof, and the output's token changes to say so |
+| a genuinely different pair, as a control | a witness, with values | the witness is re-substituted by hand before being believed; a model parsed slightly wrong is a counterexample that isn't |
+| a solver that cannot run, times out, or answers unknown | nothing | the sampled statement stands alone, and the run says the proof was attempted |
+
+Two details carry the honesty of the whole exercise. **The proof is about the semantics the tool
+actually evaluates**: its evaluator masks a shift count to six bits, an x86 habit, and the question put
+to the solver applies the same mask on both sides -- without that, the solver would prove a cleaner
+function than the one the samples ran on, and the proof would not cover its own sampling. And **a
+proven reduction is not a lifted algorithm**: what is proven is that the smaller form is the same
+function as the obfuscated one, which verifies a step of the lifting. The structure still has to be
+recovered, and nothing here recovers it.
+
 ## What this file does not contain
 
 - No claims about any particular protector's virtual machine. What is stated here is the shape such an
