@@ -873,9 +873,14 @@ def collect_docs(extra_path):
         if not os.path.isdir(base):
             continue
         for dirpath, dirnames, files in os.walk(base):
+            # `evidence/` records what was measured and cites the outside sources behind a claim.
+            # A command line there is a citation of somebody else's tool -- a launcher that ships
+            # inside a vendor's product, say -- rather than an instruction this repository offers,
+            # and resolving it against this kit's own interfaces reported drift on commands that
+            # were never ours to make runnable. The gate's subject is the instructions.
             dirnames[:] = sorted(d for d in dirnames
                                  if d not in ('.git', 'node_modules', '__pycache__',
-                                              'fixtures'))
+                                              'fixtures', 'evidence'))
             for f in sorted(files):
                 if f.endswith('.md'):
                     docs.append(os.path.join(dirpath, f))

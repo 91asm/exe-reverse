@@ -92,12 +92,15 @@ captures/
 # docs/tool-verification/ and carries no target identity or vendored binaries.
 tools/
 
-# Local copies of third-party write-ups that a research pass reads. They are someone else's
-# text, not content of this repository: what ships is the absorbed method under a stated
-# strength label. One `git add -A` is all it would take to commit them, so the rule is
-# explicit here rather than resting on "nobody has added them yet".
-.ref/
-_recon/
+# Local scratch: **any** top-level underscore-prefixed directory is a work area, not content.
+#
+# This is a pattern rather than a list on purpose. An explicit list is how a research directory
+# reached the staging area once: the directory names are chosen by whatever the research needed,
+# so a rule that enumerates them is a rule that has to be updated by the person least likely to
+# remember. Measured: one such directory carried 37.5 MB of third-party sources, a crash dump and
+# a build artefact with a developer's home path inside it, all one `git add -A` away from being
+# committed to this repository.
+/_*/
 *.orig
 *.rej
 

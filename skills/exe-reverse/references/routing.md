@@ -36,6 +36,7 @@ without a check.
 | Your signature-based patch worked on one version and misses on the next | `references/aob-and-signatures.md` |
 | Two supposedly identical builds behave differently | `references/pe-diff-and-versions.md` |
 | The target is a .NET assembly and hex-patching it does nothing | `references/managed-dotnet.md` |
+| The payload holds a large `data/app.so` and hardly any native code | `references/flutter-and-dart-aot.md` |
 | The sample is an installer, and the interesting binary is nowhere on disk after install | `references/installers-and-packaging.md` |
 | The file is a driver, or it refuses to load without a driver present | `references/kernel-and-drivers.md` |
 | You need to observe a check without modifying anything, and every hook is detected | `references/hardware-tracing.md` |
@@ -80,6 +81,7 @@ reference that is loaded at the wrong moment costs context and answers nothing.
 | `references/symbolic-execution.md` | reading has stopped paying: when a solver or an emulator is the cheaper route |
 | `references/managed-dotnet.md` | a managed assembly, or a mixed-mode one, is the target |
 | `references/installers-and-packaging.md` | the sample arrives as an installer or a package |
+| `references/flutter-and-dart-aot.md` | the payload is a Flutter application: an ELF `app.so` inside a Windows package, with the behaviour in compiled Dart |
 | `references/kernel-and-drivers.md` | the boundary where user-mode tooling stops |
 | `references/hardware-tracing.md` | observing without modifying: hardware breakpoints, instruction tracing, and what each requires |
 | `references/hypervisor-observation.md` | the layer above the operating system, and what its presence changes |
@@ -110,6 +112,10 @@ explicit paths for anything it shells out to. `--help` on each one is the author
 | `scripts/capabilities.py` | the capability registry: what each capability needs, how to detect it, which script implements it and which reference documents it |
 | `scripts/make_fixture_pe.py` | build a synthetic PE image offline for testing (PE32 or PE32+, five sections, imports/exports/resources/TLS/debug/relocations, a correct checksum, and a byte sequence planted twice on purpose) |
 | `scripts/scan_leaks.py` | scan a repository for target identity before publishing: rules with their exemptions, findings with their context, `--show-exempt` for the suppressions, and an exit code that can gate a commit |
+| `scripts/doctor.py` | run this first: capability verdicts from the registry, per-script runnability from a static dependency pass, and the host facts that would silently poison an experiment |
+| `scripts/preflight.py` | run this before one session starts: the sample hashed and a working copy in place, the destination writable and large enough for the route, the route's prerequisites held, and no leftover tracing session or proxy to make the run incomparable |
+| `scripts/capabilities.py` | the capability registry: atoms and their closures, what each needs, an executable next step for anything missing, and a cost estimate labelled with the strength of the measurement behind it |
+| `scripts/dart_snapshot_strings.py` | recover string literals from a Dart AOT snapshot (the `app.so` of a Flutter application) and report the reference mechanism, which decides whether instruction scanning can find a literal's users at all |
 
 ## Sub-indexes
 

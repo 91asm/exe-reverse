@@ -55,9 +55,12 @@ And one thing at the end that is meant to be *withheld*: **"done" has a definiti
 clean log is not one of them. Anything short of all six is a checkpoint, and should be reported as a
 checkpoint with what remains.
 
-The cheapest possible first command is `python skills/exe-reverse/scripts/hwprobe.py`. It reports
-which routes **this machine** can actually support — including whether a hypervisor is present, which
-changes what a debugger and a hardware breakpoint can do — rather than what is possible in principle.
+The cheapest possible first command is `python skills/exe-reverse/scripts/doctor.py`. It answers
+three questions in one pass: which capabilities this host actually supports and what to install for
+the ones it does not, whether every script in the kit is runnable as-is, and which host facts would
+silently poison an experiment. `python skills/exe-reverse/scripts/hwprobe.py` is the deeper
+hardware-level probe beneath it, and `python skills/exe-reverse/scripts/capabilities.py --verbose`
+prints the next action for anything blocked.
 
 ## What it is good at
 
@@ -150,19 +153,25 @@ export EXEREV_TOOLS=<dir>:<dir>                  # POSIX
 
 | Tool | Used for |
 |---|---|
-| Python 3.9+ | every script; the PE reader, patcher and probe are dependency-free |
+| Python 3.9+ | every script; the PE reader, patcher, host probe, capability registry and doctor are dependency-free |
 | A disassembler/decompiler (IDA, Ghidra, Binary Ninja, Cutter) | reading code; several are GUI-only, and a GUI-only tool is a request for a human, not a reason to substitute a weaker one |
 | A debugger (x64dbg, WinDbg) | locating runtime behaviour and watching values |
 | `dumpbin` / `link` (MSVC toolchain) | header and import inspection when you have the SDK |
+| An installer extractor (`innoextract`, 7-Zip, `expand`) | getting at a payload without running the installer. Extract first and re-triage what came out: it is a new unknown |
 | Frida | runtime instrumentation where a hook is acceptable |
 | Procmon / ETW tooling (`wpr`, `logman`) | file, registry and system event evidence |
 | A .NET toolchain | managed assemblies are a different artifact with a different toolchain |
+| A solver or emulator (Z3, Triton, angr, Unicorn, Qiling) | reducing a trace or a condition instead of reading it; `skills/exe-reverse/references/symbolic-execution.md` records which default of each will change your answer |
 | An isolated VM | the analysis host is part of the experiment |
 | A second machine | kernel debugging on a current Windows host |
-| A CPU that reports the trace feature, plus a capture path | the hardware-observation routes; the probe reports what this host has |
+| A CPU that reports the trace feature, plus a capture path | the hardware-observation routes; the probe reports what this host has, and on this platform the capture path is the open question rather than the decoding |
 
 None of these need to be on `PATH`: the scripts accept explicit paths for the tools they shell out
 to, and a runnable archive or a script counts as installed.
+`skills/exe-reverse/scripts/capabilities.py` carries the
+same list as a probed registry, with an executable next step and a cost estimate for each entry.
+`ls skills/exe-reverse/scripts/` is the authoritative list; `skills/exe-reverse/references/routing.md`
+describes each one.
 
 ## Read this first
 

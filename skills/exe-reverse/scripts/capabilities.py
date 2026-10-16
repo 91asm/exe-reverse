@@ -1,579 +1,1290 @@
 #!/usr/bin/env python3
-"""The capability registry this skill's metadata points at: what each route needs, and whether
-this host has it.
+# -*- coding: utf-8 -*-
+"""Capability registry: the one place that decides what this host can actually do.
 
-Why a registry rather than a list in prose: every route in this skill is conditional. Hardware
-breakpoints need four debug registers and a host where the debug exception is not intercepted;
-instruction tracing needs a processor feature *and* a capture path; a kernel driver needs test
-signing and a reboot; managed assemblies need tooling that is not a hex editor; ETW needs an
-elevated session. A route that is planned without checking its precondition fails at the first
-step and the failure gets attributed to the target. So each capability here states what it needs,
-how to detect whether this machine has it, which script implements it, and which reference
-documents it -- and the detection is a real probe, not an assumption.
+WHY THIS EXISTS
+---------------
+An earlier version of this file answered the capability question from a hand-written list of
+21 rows whose `needs` column was prose, and delegating every probe to one other script. That
+is a description of a route, not a measurement of one: "needs a debugger" cannot tell you
+whether the debugger is installed, whether it can be driven without a human, or whether the
+host's virtualisation layer will intercept the mechanism you plan to use.
 
-Three states, and they are not interchangeable:
+So the question is answered here, once, from probed facts:
 
-  available    -- measured to work on this machine right now
-  needs-<x>    -- the mechanism exists but is gated on something named in the row
-  unavailable  -- measured absent
-  unknown      -- the probe itself could not run, so nothing is claimed about this machine
+  * a capability has a **closure** -- the atoms it needs, plus the capabilities it depends on,
+    expanded recursively (`depends_on`), so `hardware_breakpoint` cannot be ok while the
+    debugger it needs is blocked, and `dump_repair` cannot be ok while `dump_capture` is;
+  * an atom is either probed on this host (an executable on PATH or under `EXEREV_TOOLS`, an
+    importable module, a file this skill ships, a processor feature, a privilege, an operator
+    supplied artifact) or it is an external **artifact** the host cannot install -- those are
+    reported as missing, never silently assumed;
+  * a missing atom carries a **next action that can be executed**: the exact directory to
+    expose, environment variable to set, or package to install, with the command written out;
+  * a cost estimate is attached only where this repository measured one, and is labelled
+    `unverified` where it did not. A guess presented as a measurement is the failure this
+    module exists to remove;
+  * an alternative route is expressed as `any_of`, so "use one of these" is resolved by
+    probing rather than by a preference nobody checked.
 
-`unknown` is separate from `unavailable` on purpose, and the distinction is this skill's rule:
-"the probe could not read CPUID" and "this CPU lacks the feature" are different statements, and
-collapsing them turns a broken measurement into a fact. A missing capability is a finding about
-the machine, not a failure of the task, so the exit code never reflects it.
+WHAT IT DOES NOT DO
+-------------------
+It never installs anything, never imports a probed module (probing uses
+`importlib.util.find_spec`, so a module is never executed), never runs a debugger, and never
+touches a target.
 
-This module imports cleanly with no side effects and no third-party imports: the table is data,
-and every probe is behind `--check`. Probing reuses `hwprobe.py` rather than reimplementing it --
-CPUID, the OS and policy keys, the privilege token, the tool inventory and the Python module list
-all come from that script's own functions, so this registry cannot drift away from the probe it
-describes. The one join it cannot read directly is the tool *name* for a found path: hwprobe's
-tool rows carry the reason and the resolved path but not the name, so the index here is built from
-the resolved basename and a name that resolves to something unexpected will show as missing rather
-than as present.
+CAPABILITY DECLARATION
+----------------------
+A script may declare its capability as the first line of its own docstring, written as
 
-A note on the reference column: this registry names only reference files that exist in this
-checkout. Where the route is documented in this skill by a file that is not present, the row says
-so in its boundary rather than pointing a reader at a path that will not open.
+    capability: <capability_id>[, <capability_id>]
 
-Usage:
-    python capabilities.py --list
-    python capabilities.py --check
-    python capabilities.py --check --json
-    python capabilities.py --explain pe-build-compare
+directly under the opening quotes, before the prose. `doctor.py` reads that declaration when
+it is present. Scripts without one are resolved through `SCRIPT_CAPABILITIES` below, which is
+an explicit, auditable mapping; a script present in neither is reported as `unknown` and
+**counted**, never skipped.
 
-Exit codes: 0 = report produced, 2 = usage error, 3 = --explain named an unknown capability id.
+Usage
+-----
+    python capabilities.py                    # every capability, one line each
+    python capabilities.py --verbose          # + missing atoms and the next action
+    python capabilities.py --list             # ids and names only
+    python capabilities.py <capability_id>    # one capability, verbosely
+    python capabilities.py --json             # machine-readable, all
+    python capabilities.py --json byte_patch  # machine-readable, one
+
+Exit codes: 0 = every capability ok, 3 = at least one blocked, 2 = usage error,
+4 = internal error. The last line is `RESULT=<token>`.
 """
+
 import argparse
+import ast
+import importlib.util
 import json
 import os
-import platform
+import re
+import shutil
 import sys
 
-# --- registry -----------------------------------------------------------------
-# detect is (kind, argument). The kinds are implemented by capability_state() below; anything not
-# in that table is reported as unknown rather than guessed, so adding a row cannot silently produce
-# a wrong answer.
-CAPABILITIES = [
-    {
-        'id': 'pe-structure-read',
-        'what': 'parse PE headers, sections, directories and translate an RVA to a file offset',
-        'needs': 'Python 3.9+ and read access to the file',
-        'needs_short': 'python',
-        'detect': ('python', None),
-        'script': 'peutil.py',
-        'reference': 'references/pe-structure.md',
-        'boundary': ('reads headers and structures; it does not disassemble, decompile or repair a '
-                     'damaged image'),
+# A real declaration is `capability: id` or `capability: id, id2` and nothing else. See
+# `declared_capability` for why the pattern must not accept a template.
+_DECLARATION_RE = re.compile(r'(?i)^capability:\s*([a-z_][a-z0-9_]*(?:\s*,\s*[a-z_][a-z0-9_]*)*)$')
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SKILL_DIR = os.path.dirname(HERE)
+REPO_ROOT = os.path.dirname(os.path.dirname(SKILL_DIR))
+
+# ---------------------------------------------------------------- exit codes
+# 0 success / 1 negative finding / 2 usage / 3 environment short of a capability
+# 4 internal error. Shared by every script in this kit; keep the numbers stable.
+EXIT_OK = 0
+EXIT_USE = 2
+EXIT_ENV = 3
+EXIT_INTERNAL = 4
+
+TOKENS = {
+    'ok': 'capabilities_ok',
+    'partial': 'capabilities_partial',
+    'blocked': 'capabilities_blocked',
+    'use': 'usage_error',
+    'internal': 'internal_error',
+}
+
+# Cost estimates. `basis` is the strength label of the *measurement*:
+#   observed   -- timed in this repository, the figure and its source recorded
+#   unverified -- nobody here has timed it; the number is a planning aid only
+ATOMS = {
+    # --- the interpreter ------------------------------------------------------
+    'python39': {
+        'name': 'Python 3.9+',
+        'kind': 'python',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'Every script here is standard-library only. A bare interpreter is a working '
+                'install, which is why no other Python atom is required by anything.',
     },
-    {
-        'id': 'pe-triage-signals',
-        'what': 'one-pass triage of an unknown PE: identity, build evidence, protective signals',
-        'needs': 'Python 3.9+ and read access to the file',
-        'needs_short': 'python',
-        'detect': ('python', None),
-        'script': 'pe_triage.py',
-        'reference': 'references/recon.md',
-        'boundary': ('header-level heuristics. Entropy, section shape and a thin import table are '
-                     'reasons to look, never verdicts, and this route cannot establish that an '
-                     'image is packed'),
+
+    # --- Python modules -------------------------------------------------------
+    'module:pefile': {
+        'name': 'pefile (third-party PE reader)',
+        'kind': 'module',
+        'module': 'pefile',
+        'install': 'python -m pip install pefile',
+        'est_minutes': 2,
+        'basis': 'observed',
+        'note': 'Not needed: scripts/peutil.py reads PE images without it. Listed because its '
+                'answers are worth cross-checking against a second implementation.',
     },
-    {
-        'id': 'pe-checksum-recompute',
-        'what': 'compute the PE checksum Microsoft\'s own algorithm produces, and compare it',
-        'needs': 'Python 3.9+; cost is linear in file size',
-        'needs_short': 'python',
-        'detect': ('python', None),
-        'script': 'peutil.py',
-        'reference': 'references/integrity-checks.md',
-        'boundary': ('the PE checksum only. It says nothing about an Authenticode signature, and a '
-                     'matching checksum is not evidence that the file was not modified'),
+    'module:capstone': {
+        'name': 'capstone (disassembly backend)',
+        'kind': 'module',
+        'module': 'capstone',
+        'install': 'python -m pip install capstone',
+        'est_minutes': 2,
+        'basis': 'observed',
+        'note': 'The route from a byte range to instructions when no full disassembler is '
+                'installed. Version drift changes which instructions decode, so record it.',
     },
-    {
-        'id': 'equal-length-byte-patch',
-        'what': 'apply an equal-length, verified byte patch and recompute the checksum',
-        'needs': 'Python 3.9+ and a writable copy of the input',
-        'needs_short': 'python + writable copy',
-        'detect': ('python', None),
-        'script': 'pepatch.py',
-        'reference': 'references/patching.md',
-        'boundary': ('equal-length edits only unless a resize is explicitly requested; a patch that '
-                     'lands in the file is still not proof it is reached at run time'),
+    'module:keystone': {
+        'name': 'keystone (assembler backend)',
+        'kind': 'module',
+        'module': 'keystone',
+        'install': 'python -m pip install keystone-engine',
+        'est_minutes': 3,
+        'basis': 'unverified',
+        'note': 'Assembling a replacement for a code range. The mirror of capstone; needed only '
+                'when a patch must be written rather than picked from existing bytes.',
     },
-    {
-        'id': 'aob-signature-locate',
-        'what': 'locate a byte pattern and report how many sites it matches',
-        'needs': 'Python 3.9+ and read access to the file',
-        'needs_short': 'python',
-        'detect': ('python', None),
-        'script': 'aob_scan.py',
-        'reference': 'references/aob-and-signatures.md',
-        'boundary': ('a pattern is a locator only while it is unique; this route reports ambiguity '
-                     'rather than picking the first hit'),
+    'module:unicorn': {
+        'name': 'unicorn (CPU emulation)',
+        'kind': 'module',
+        'module': 'unicorn',
+        'install': 'python -m pip install unicorn',
+        'est_minutes': 3,
+        'basis': 'observed',
+        'note': 'Emulating a bounded routine so it can be called without its program. The cost '
+                'is never the CPU model, it is stubbing everything the routine calls.',
     },
-    {
-        'id': 'pe-build-compare',
-        'what': 'compare two builds: section content hashes, normalised volatile fields, byte ranges',
-        'needs': 'Python 3.9+ and both files on disk',
-        'needs_short': 'python + two builds',
-        'detect': ('python', None),
-        'script': 'pe_diff.py',
-        'reference': 'references/verification.md',
-        'boundary': ('a diff shows change, never intent, and identical bytes do not prove identical '
-                     'behaviour'),
+    'module:lief': {
+        'name': 'lief (binary rewriting)',
+        'kind': 'module',
+        'module': 'lief',
+        'install': 'python -m pip install lief',
+        'est_minutes': 3,
+        'basis': 'observed',
+        'note': 'Rewriting structures rather than editing bytes in place. Useful when a change '
+                'cannot be equal-length, which is exactly when this skill says to stop and think.',
     },
-    {
-        'id': 'fixture-pe-generation',
-        'what': 'build a deterministic synthetic PE to test a parser or a patch offline',
-        'needs': 'Python 3.9+',
-        'needs_short': 'python',
-        'detect': ('python', None),
-        'script': 'make_fixture_pe.py',
-        'reference': 'references/verification.md',
-        'boundary': ('structurally valid but not runnable: there is no real code and the entry '
-                     'point is a stub, so it cannot verify behaviour'),
+    'module:frida': {
+        'name': 'frida (host package)',
+        'kind': 'module',
+        'module': 'frida',
+        'install': 'python -m pip install frida  (host version must match the agent that runs '
+                   'inside the target)',
+        'est_minutes': 5,
+        'basis': 'observed',
+        'note': 'The host half. Where it is an old release, a target on a recent runtime can be '
+                'refused before any hook is placed.',
     },
-    {
-        'id': 'leak-scan-before-publish',
-        'what': 'scan notes and scripts for target identity before they leave the machine',
-        'needs': 'Python 3.9+',
-        'needs_short': 'python',
-        'detect': ('python', None),
-        'script': 'scan_leaks.py',
-        'reference': 'references/desensitization.md',
-        'boundary': ('a rule table over text; it cannot recognise an identifier it has no rule for'),
+    'module:triton': {
+        'name': 'triton (dynamic binary analysis, tainting and symbolic expressions)',
+        'kind': 'module',
+        'module': 'triton',
+        'install': 'python -m pip install triton-library  (the import name is `triton`; confirm '
+                   'the distribution name for your interpreter before trusting this line)',
+        'est_minutes': 10,
+        'basis': 'unverified',
+        'note': 'The route for reducing a trace rather than reading it: symbolise the inputs, '
+                'taint them through the instructions, and hand the resulting expression to a '
+                'solver. Requires a build toolchain on some interpreters.',
     },
-    {
-        'id': 'host-capability-probe',
-        'what': 'measure what this machine supports, with the probe behind every answer',
-        'needs': 'Python 3.9+; the CPUID stub needs a Windows x64 host to allocate and call',
-        'needs_short': 'python on Windows',
-        'detect': ('python', None),
-        'script': 'hwprobe.py',
-        'reference': 'references/environment.md',
-        'boundary': ('reports measurements, not a plan; CPUID capability bits whose meanings were '
-                     'not verified against a primary source are printed raw'),
+    'module:z3': {
+        'name': 'z3-solver (SMT solver)',
+        'kind': 'module',
+        'module': 'z3',
+        'install': 'python -m pip install z3-solver',
+        'est_minutes': 2,
+        'basis': 'observed',
+        'note': 'The reduction step: an expression becomes a small equivalent one, or a '
+                'condition becomes a witness. A model returned is not the same as an answer '
+                'validated against the target.',
     },
-    {
-        'id': 'interactive-user-debugger',
-        'what': 'attach, break, single-step and inspect a live process',
-        'needs': 'a debugger installed (x64dbg, WinDbg or cdb)',
-        'needs_short': 'a debugger',
-        'detect': ('tool', ('x64dbg', 'windbg', 'cdb')),
-        'script': None,
-        'reference': 'references/dynamic-debugging.md',
-        'boundary': ('interactive: a GUI debugger is run by a person, not shelled by these scripts. '
-                     'A target that detects the debugger fails this route before it yields data'),
+    'module:angr': {
+        'name': 'angr (symbolic execution and path exploration)',
+        'kind': 'module',
+        'module': 'angr',
+        'install': 'python -m pip install angr',
+        'est_minutes': 15,
+        'basis': 'unverified',
+        'note': 'Explores paths rather than executing one. The cost is the environment model: a '
+                'routine that calls into the platform needs those calls stubbed before a run '
+                'reaches the condition you care about.',
     },
-    {
-        'id': 'hardware-breakpoints',
-        'what': 'watch an address or an access through the processor debug registers (DR0-DR3)',
-        'needs': 'a user-mode debugger and a host where the debug exception is not intercepted',
-        'needs_short': '4 debug registers',
-        'detect': ('cpu', 'hypervisor'),
-        'state_map': {True: 'needs-hypervisor-free-host', False: 'available'},
-        'script': 'hwprobe.py',
-        'reference': 'references/dynamic-debugging.md',
-        'boundary': ('four registers is an architectural constant; when a hypervisor is present the '
-                     'debug exception may be intercepted rather than reaching your handler, which '
-                     'is why the row is gated on it'),
+
+    # --- static analysis ------------------------------------------------------
+    'tool:ghidra': {
+        'name': 'Ghidra (headless capable)',
+        'kind': 'tool',
+        'tool': 'analyzeHeadless',
+        'alternatives': ['analyzeHeadless.bat', 'ghidraRun'],
+        'install': 'unpack the Ghidra release and put its support/ directory on EXEREV_TOOLS, '
+                   'or call analyzeHeadless with an absolute path',
+        'est_minutes': 10,
+        'basis': 'observed',
+        'note': 'The one decompiler route that is free and scriptable. Its headless launcher '
+                'does the work unattended; the GUI is not required and should not be scripted.',
     },
-    {
-        'id': 'instruction-trace-intel-pt',
-        'what': 'capture a full instruction trace with no software instrumentation in the target',
-        'needs': 'CPUID.07H.0:EBX[25] set, plus a capture path (ETW or a driver) and a decoder',
-        'needs_short': 'CPU trace support',
-        'detect': ('cpu', 'intel_pt'),
-        'script': 'hwprobe.py',
-        'reference': 'references/environment.md',
-        'boundary': ('the CPU reporting support is not the same as capture working end to end. Treat '
-                     'the capture path, not the feature bit, as the constraint; the dedicated '
-                     'reference file for this route is not present in this checkout'),
+    'tool:ida': {
+        'name': 'IDA Pro / IDA Free',
+        'kind': 'tool',
+        'tool': 'ida64',
+        'alternatives': ['ida', 'idat64', 'idat'],
+        'install': 'install IDA and put its directory on EXEREV_TOOLS',
+        'est_minutes': 20,
+        'basis': 'unverified',
+        'note': 'Autonomous runs need the dialog-suppressing switch together with a script '
+                'switch; the two are separate and only one of them runs your code.',
     },
-    {
-        'id': 'etw-capture',
-        'what': 'record system and provider events for offline correlation',
-        'needs': 'wpr, xperf, logman or tracelog, and normally an elevated session',
-        'needs_short': 'ETW tooling',
-        'detect': ('tool', ('wpr', 'xperf', 'logman', 'tracelog')),
-        'script': None,
-        'reference': 'references/environment.md',
-        'boundary': ('kernel providers need elevation; a trace is evidence about what the system '
-                     'did, not about what the target intended'),
+    'tool:binaryninja': {
+        'name': 'Binary Ninja',
+        'kind': 'tool',
+        'tool': 'binaryninja',
+        'install': 'install Binary Ninja; the Python API is imported as `binaryninja`',
+        'est_minutes': 15,
+        'basis': 'unverified',
+        'note': 'Headless use is gated on the licence rather than on the API: an edition that '
+                'does not include headless access refuses the operation. Confirm before planning.',
     },
-    {
-        'id': 'kernel-driver-load',
-        'what': 'load and observe a driver of your own, or the target\'s',
-        'needs': 'test signing or a kernel-debug boot flag, plus a reboot; VBS/HVCI may refuse an '
-                 'unsigned driver regardless',
-        'needs_short': 'test signing',
-        'detect': ('boot', 'testsigning'),
-        'script': 'hwprobe.py',
-        'reference': 'references/environment.md',
-        'boundary': ('no route around a driver signature is shipped here; the gate is reported, and '
-                     'a second machine is usually cheaper than defeating it. The dedicated '
-                     'reference file for this route is not present in this checkout'),
+    'tool:radare2': {
+        'name': 'radare2',
+        'kind': 'tool',
+        'tool': 'r2',
+        'alternatives': ['radare2'],
+        'install': 'install radare2 and put its bin/ on EXEREV_TOOLS',
+        'est_minutes': 5,
+        'basis': 'observed',
+        'note': 'The lightest scriptable disassembler here: a command string in, text or JSON '
+                'out, no licence and no GUI.',
     },
-    {
-        'id': 'kernel-debug',
-        'what': 'debug the kernel with a debugger attached over a debug transport',
-        'needs': 'the kernel-debug boot flag and a second machine or a virtual serial pair',
-        'needs_short': 'kernel debug boot',
-        'detect': ('boot', 'kernel-debug-boot'),
-        'script': 'hwprobe.py',
-        'reference': 'references/environment.md',
-        'boundary': ('the boot flag being present says the machine is configured for it, not that a '
-                     'debugger is connected; a kernel debug of a live host on the same machine is '
-                     'not offered here'),
+    'tool:rizin': {
+        'name': 'rizin (radare2 fork)',
+        'kind': 'tool',
+        'tool': 'rz-bin',
+        'install': 'install rizin; its tools are named rz-* and its flags differ from radare2',
+        'est_minutes': 5,
+        'basis': 'unverified',
+        'note': 'A fork, not an alias. A command copied from a radare2 page can mean something '
+                'different here, which is worth knowing before following a tutorial.',
     },
-    {
-        'id': 'runtime-instrumentation-frida',
-        'what': 'hook and trace a running process from a script without touching the file',
-        'needs': 'the frida Python module or the frida CLI',
-        'needs_short': 'frida',
-        'detect': ('module', 'frida'),
-        'script': None,
-        'reference': 'references/injection-and-hooking.md',
-        'boundary': ('hooks are observable: a target that checks its own code, its import table or '
-                     'its thread context can detect this route'),
+    'tool:cutter': {
+        'name': 'Cutter',
+        'kind': 'tool',
+        'tool': 'Cutter',
+        'install': 'install Cutter (a graphical front end over rizin)',
+        'est_minutes': 10,
+        'basis': 'unverified',
+        'note': 'Graphical. Useful for a human reading a control-flow graph, not for an '
+                'unattended run.',
     },
-    {
-        'id': 'memory-dump-analysis',
-        'what': 'capture a process image and analyse what the live process actually contained',
-        'needs': 'procdump or a debugger able to write a dump',
-        'needs_short': 'a dumper',
-        'detect': ('tool', ('procdump', 'windbg')),
-        'script': None,
-        'reference': 'references/memory-and-dumps.md',
-        'boundary': ('a dump is a snapshot of one moment: code that was not yet unpacked or not yet '
-                     'paged in is simply absent from it'),
+    'tool:diec': {
+        'name': 'Detect It Easy, console form',
+        'kind': 'tool',
+        'tool': 'diec',
+        'alternatives': ['die', 'diel'],
+        'install': 'download the release and put its directory on EXEREV_TOOLS; `diec` is the '
+                   'console binary, `die` the GUI, `diel` the scanner alone',
+        'est_minutes': 5,
+        'basis': 'observed',
+        'note': 'Names a packer or protector from structure. An identification is a starting '
+                'point, not a route: the same file can be named differently by two tools.',
     },
-    {
-        'id': 'time-travel-debugging',
-        'what': 'record execution and replay it backwards to find the origin of a value',
-        'needs': 'WinDbg with TTD support, and a process that may be recorded',
-        'needs_short': 'windbg (TTD)',
-        'detect': ('tool', ('windbg',)),
-        'script': None,
-        'reference': 'references/memory-and-dumps.md',
-        'boundary': ('recording is user-mode only and heavy; a trace whose format you cannot replay '
-                     'is not a finding'),
+    'tool:dumpbin': {
+        'name': 'dumpbin (MSVC toolchain)',
+        'kind': 'tool',
+        'tool': 'dumpbin',
+        'install': 'install the Visual Studio build tools and put the directory containing '
+                   'dumpbin on EXEREV_TOOLS, or run it from a developer command prompt',
+        'est_minutes': 25,
+        'basis': 'observed',
+        'note': 'Header and import inspection from Microsoft. scripts/peutil.py answers the same '
+                'questions offline, which is why this is optional here.',
     },
-    {
-        'id': 'signature-inspection',
-        'what': 'inspect and re-sign an Authenticode signature',
-        'needs': 'signtool (MSVC/Windows SDK tooling)',
-        'needs_short': 'signtool',
-        'detect': ('tool', ('signtool',)),
-        'script': None,
-        'reference': 'references/integrity-checks.md',
-        'boundary': ('inspecting a signature and producing one that a target accepts are different '
-                     'problems; only the first is offered here'),
+    'tool:innoextract': {
+        'name': 'innoextract (Inno Setup extractor)',
+        'kind': 'tool',
+        'tool': 'innoextract',
+        'install': 'winget install --id dscharrer.innoextract   (or download the release archive '
+                   'and put its directory on EXEREV_TOOLS)',
+        'est_minutes': 2,
+        'basis': 'observed',
+        'note': 'Unpacks an Inno Setup installer without running it. Measured here: it listed and '
+                'extracted a 6.1.0-format installer although its own banner declares support to '
+                '6.0.5, so treat the banner as a signal about the tool rather than a verdict on '
+                'your file -- try it before routing around it.',
     },
-    {
-        'id': 'elevated-privilege',
-        'what': 'act with an administrator token, which several routes above require',
-        'needs': 'an elevated session',
-        'needs_short': 'elevation',
-        'detect': ('privilege', 'elevated'),
-        'script': 'hwprobe.py',
-        'reference': 'references/environment.md',
-        'boundary': ('elevation is necessary for some routes and never sufficient for any: it does '
-                     'not enable a driver load or a kernel debug on its own'),
+    'tool:7z': {
+        'name': '7-Zip',
+        'kind': 'tool',
+        'tool': '7z',
+        'alternatives': ['7za', '7zz'],
+        'install': 'install 7-Zip and put its directory on EXEREV_TOOLS',
+        'est_minutes': 3,
+        'basis': 'observed',
+        'note': 'Unpacks many container formats, and notably NOT Inno Setup. Useful for package '
+                'and self-extracting-archive payloads and for nested archives.',
     },
-    {
-        'id': 'licence-mechanism-classification',
-        'what': 'classify where a licence decision is made before touching any code',
-        'needs': 'Python 3.9+ (the classification itself is analysis, not a tool)',
-        'needs_short': 'python',
-        'detect': ('python', None),
-        'script': None,
-        'reference': 'references/license-mechanisms.md',
-        'boundary': ('classifies the mechanism; a client-side patch cannot change a decision the '
-                     'server makes, and misidentifying the owning layer is the most expensive wrong '
-                     'turn in this skill'),
+    'tool:strings': {
+        'name': 'strings',
+        'kind': 'tool',
+        'tool': 'strings',
+        'install': 'ships with a GNU toolchain (MinGW, MSYS2, Git for Windows)',
+        'est_minutes': 3,
+        'basis': 'observed',
+        'note': 'Minimum-length and encoding defaults differ between implementations, so the '
+                'same file gives different lists. Record the invocation with the result.',
     },
-]
+    'tool:objdump': {
+        'name': 'objdump',
+        'kind': 'tool',
+        'tool': 'objdump',
+        'install': 'ships with a GNU toolchain; a MinGW build reads PE files as well as ELF',
+        'est_minutes': 3,
+        'basis': 'observed',
+        'note': 'Section dump and disassembly without a licence. Its output is large, so fold it '
+                'before it reaches anything with a context limit.',
+    },
+
+    # --- debuggers ------------------------------------------------------------
+    'tool:x64dbg': {
+        'name': 'x64dbg',
+        'kind': 'tool',
+        'tool': 'x64dbg',
+        'alternatives': ['x32dbg'],
+        'install': 'download the snapshot archive and put its release/ directory on EXEREV_TOOLS',
+        'est_minutes': 5,
+        'basis': 'observed',
+        'note': 'Graphical, and the command line it accepts is a startup form (a file, an '
+                'argument, an optional command string) rather than a scripting interface. Treat '
+                'its scripting as a thing a human drives.',
+    },
+    'tool:windbg': {
+        'name': 'WinDbg (and its command-line engine)',
+        'kind': 'tool',
+        'tool': 'windbg',
+        'alternatives': ['WinDbgX', 'dbgeng'],
+        'install': 'install WinDbg from the Store or the SDK; the modern package is a separate '
+                   'binary from the classic one',
+        'est_minutes': 15,
+        'basis': 'observed',
+        'note': 'The only route to a recorded replay of a user-mode session, and the only '
+                'supported kernel debugger. Both of those are capabilities of this tool alone.',
+    },
+    'tool:cdb': {
+        'name': 'cdb (command-line debugger engine)',
+        'kind': 'tool',
+        'tool': 'cdb',
+        'install': 'install the Debugging Tools for Windows component of the SDK',
+        'est_minutes': 15,
+        'basis': 'unverified',
+        'note': 'The unattended form: a process or a dump plus a quoted command list, output to '
+                'stdout. This is the debugger an agent should prefer over driving a GUI.',
+    },
+    'tool:gdb': {
+        'name': 'gdb',
+        'kind': 'tool',
+        'tool': 'gdb',
+        'install': 'ships with MinGW-w64 or MSYS2',
+        'est_minutes': 10,
+        'basis': 'observed',
+        'note': 'Works on PE images with a matching build, and its PE support is narrower than '
+                'its ELF support. Fine for a locally compiled helper, not the first choice for '
+                'a hardened target.',
+    },
+    'tool:ttd': {
+        'name': 'Time Travel Debugging recorder',
+        'kind': 'tool',
+        'tool': 'ttd',
+        'alternatives': ['TTD.exe'],
+        'install': 'ships with the modern WinDbg package',
+        'est_minutes': 15,
+        'basis': 'observed',
+        'note': 'Records a user-mode session for replay. Elevated, user-mode only, and the '
+                'recording is large; replay is read-only.',
+    },
+
+    # --- instrumentation ------------------------------------------------------
+    'tool:frida': {
+        'name': 'frida (command-line tools)',
+        'kind': 'tool',
+        'tool': 'frida',
+        'alternatives': ['frida-trace', 'frida-ps'],
+        'install': 'python -m pip install frida-tools',
+        'est_minutes': 5,
+        'basis': 'observed',
+        'note': 'The command-line front ends over the host module. Useful without writing an '
+                'agent; a hook is a modification, so it changes the observation.',
+    },
+    'tool:procdump': {
+        'name': 'ProcDump',
+        'kind': 'tool',
+        'tool': 'procdump',
+        'alternatives': ['procdump64'],
+        'install': 'download the Sysinternals package and put its directory on EXEREV_TOOLS',
+        'est_minutes': 5,
+        'basis': 'observed',
+        'note': 'Capture triggered by a condition (a fault, a threshold, a delay). Note its own '
+                'licence terms before distributing anything captured with it.',
+    },
+    'tool:scylla': {
+        'name': 'Scylla (import table reconstruction)',
+        'kind': 'tool',
+        'tool': 'Scylla',
+        'install': 'download the standalone release, or use the plugin shipped inside x64dbg',
+        'est_minutes': 10,
+        'basis': 'unverified',
+        'note': 'Turns a dump whose imports were destroyed back into something that can be '
+                'analysed. Its own documentation records cases where a fully correct rebuild is '
+                'not achievable, which is worth reading before promising one.',
+    },
+
+    # --- tracing --------------------------------------------------------------
+    'tool:wpr': {
+        'name': 'Windows Performance Recorder',
+        'kind': 'tool',
+        'tool': 'wpr',
+        'install': 'included in Windows; kernel providers need an elevated session',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'The supported way to record a system-wide trace. Start and stop are commands, '
+                'so a session can be driven unattended.',
+    },
+    'tool:xperf': {
+        'name': 'xperf',
+        'kind': 'tool',
+        'tool': 'xperf',
+        'install': 'install the Windows Performance Toolkit',
+        'est_minutes': 20,
+        'basis': 'unverified',
+        'note': 'Older than the recorder and still the tool some guides name. Its flag set is '
+                'not the recorder\'s, so a copied command may be read as something else.',
+    },
+    'tool:logman': {
+        'name': 'logman / tracerpt',
+        'kind': 'tool',
+        'tool': 'logman',
+        'alternatives': ['tracerpt'],
+        'install': 'included in Windows',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'Session control and trace-to-text conversion. tracerpt is how a recorded trace '
+                'becomes something readable without a GUI.',
+    },
+    'tool:tshark': {
+        'name': 'tshark',
+        'kind': 'tool',
+        'tool': 'tshark',
+        'alternatives': ['dumpcap'],
+        'install': 'install Wireshark and put its directory on EXEREV_TOOLS',
+        'est_minutes': 10,
+        'basis': 'observed',
+        'note': 'Reading a capture rather than taking one. Where a capture must be taken, the '
+                'question is usually which boundary it was taken at.',
+    },
+
+    # --- managed code ---------------------------------------------------------
+    'tool:dotnet': {
+        'name': '.NET runtime and SDK',
+        'kind': 'tool',
+        'tool': 'dotnet',
+        'install': 'install the .NET SDK',
+        'est_minutes': 15,
+        'basis': 'observed',
+        'note': 'Answers which runtimes exist, and runs managed tooling distributed as a '
+                'package.',
+    },
+    'tool:ildasm': {
+        'name': 'ildasm',
+        'kind': 'tool',
+        'tool': 'ildasm',
+        'install': 'ships with a Visual Studio install (the SDK), not with the runtime alone',
+        'est_minutes': 25,
+        'basis': 'unverified',
+        'note': 'Disassembles CIL to text. The reverse direction is what matters for a managed '
+                'patch: text back to an assembly.',
+    },
+    'tool:ilasm': {
+        'name': 'ilasm',
+        'kind': 'tool',
+        'tool': 'ilasm',
+        'install': 'ships with the .NET Framework and with Visual Studio',
+        'est_minutes': 25,
+        'basis': 'unverified',
+        'note': 'Assembles CIL text back into an assembly, which is how a managed edit is made '
+                'without a hex editor touching metadata.',
+    },
+
+    # --- language toolchains (for reading their output) -----------------------
+    'tool:go': {
+        'name': 'Go toolchain',
+        'kind': 'tool',
+        'tool': 'go',
+        'install': 'install the Go distribution',
+        'est_minutes': 10,
+        'basis': 'observed',
+        'note': 'Its own commands read a Go binary\'s build information and disassemble it with '
+                'symbols, which is far cheaper than reconstructing them.',
+    },
+    'tool:rustc': {
+        'name': 'Rust toolchain',
+        'kind': 'tool',
+        'tool': 'rustc',
+        'alternatives': ['cargo'],
+        'install': 'install rustup',
+        'est_minutes': 20,
+        'basis': 'observed',
+        'note': 'Mostly for building a helper. Reading a Rust binary benefits from symbol '
+                'knowledge rather than from the toolchain being installed.',
+    },
+    'tool:gcc': {
+        'name': 'gcc (or another C compiler)',
+        'kind': 'tool',
+        'tool': 'gcc',
+        'install': 'install MinGW-w64 or MSYS2',
+        'est_minutes': 15,
+        'basis': 'observed',
+        'note': 'Builds a small helper, a probe, or a fixture. A toolchain that is present but '
+                'cannot compile anything is not an installed toolchain: make it produce output '
+                'once before relying on it.',
+    },
+    'tool:nasm': {
+        'name': 'nasm',
+        'kind': 'tool',
+        'tool': 'nasm',
+        'install': 'install nasm',
+        'est_minutes': 5,
+        'basis': 'observed',
+        'note': 'Assembling a small stub without a C toolchain.',
+    },
+    'tool:signtool': {
+        'name': 'signtool',
+        'kind': 'tool',
+        'tool': 'signtool',
+        'install': 'ships with the Windows SDK',
+        'est_minutes': 25,
+        'basis': 'unverified',
+        'note': 'Inspects and applies signatures. Editing a signed image invalidates the '
+                'signature over it, so this is for reading the state, not for restoring it.',
+    },
+
+    # --- files this skill ships ----------------------------------------------
+    'file:peutil.py': {'name': 'scripts/peutil.py (PE reader)', 'kind': 'file',
+                       'script': 'peutil.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:pe_triage.py': {'name': 'scripts/pe_triage.py (triage)', 'kind': 'file',
+                          'script': 'pe_triage.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:pepatch.py': {'name': 'scripts/pepatch.py (patch engine)', 'kind': 'file',
+                        'script': 'pepatch.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:aob_scan.py': {'name': 'scripts/aob_scan.py (pattern locator)', 'kind': 'file',
+                         'script': 'aob_scan.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:pe_diff.py': {'name': 'scripts/pe_diff.py (build differ)', 'kind': 'file',
+                        'script': 'pe_diff.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:hwprobe.py': {'name': 'scripts/hwprobe.py (host probe)', 'kind': 'file',
+                        'script': 'hwprobe.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:make_fixture_pe.py': {'name': 'scripts/make_fixture_pe.py (fixture builder)',
+                                'kind': 'file', 'script': 'make_fixture_pe.py',
+                                'est_minutes': 0, 'basis': 'observed'},
+    'file:scan_leaks.py': {'name': 'scripts/scan_leaks.py (identity scanner)', 'kind': 'file',
+                           'script': 'scan_leaks.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:doctor.py': {'name': 'scripts/doctor.py (environment doctor)', 'kind': 'file',
+                       'script': 'doctor.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:dart_snapshot_strings.py': {'name': 'scripts/dart_snapshot_strings.py (Dart snapshot '
+                                              'literals)', 'kind': 'file',
+                                      'script': 'dart_snapshot_strings.py',
+                                      'est_minutes': 0, 'basis': 'observed'},
+
+    # --- host capabilities, probed rather than assumed ------------------------
+    'host:elevated': {
+        'name': 'an elevated session',
+        'kind': 'host',
+        'probe': 'elevation',
+        'install': 'run the shell as administrator; several routes below are unavailable '
+                   'without it and cannot be raised from inside a script',
+        'est_minutes': 1,
+        'basis': 'observed',
+        'note': 'Kernel providers, driver loading and the replay recorder all need this.',
+    },
+    'host:hypervisor_free': {
+        'name': 'a host with no hypervisor under it',
+        'kind': 'host',
+        'probe': 'hypervisor',
+        'install': 'not installable: this is a property of the machine. Move the analysis to a '
+                   'host whose processor feature report does not set the hypervisor bit, or '
+                   'accept that the intercepted routes are intercepted',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'A virtualisation layer can consume the debug exception, which turns a working '
+                'mechanism into one that never fires and looks like a tool fault.',
+    },
+    'host:debug_registers': {
+        'name': 'hardware breakpoints usable on this host',
+        'kind': 'host',
+        'probe': 'breakpoints',
+        'install': 'not installable: the architecture provides a small fixed number, and a '
+                   'hypervisor decides whether they reach your handler',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'They do not modify the bytes they watch, which is why this route is reached '
+                'for when a code check would notice a software breakpoint.',
+    },
+    'host:intel_pt_cpu': {
+        'name': 'a processor that reports the trace feature',
+        'kind': 'host',
+        'probe': 'intel_pt',
+        'install': 'not installable: a hardware capability',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'Reports capability only. A trace unit also needs a way to reach its output, '
+                'and on this platform that path is not documented for user mode.',
+    },
+    'host:test_signing': {
+        'name': 'boot configuration that accepts test-signed code',
+        'kind': 'host',
+        'probe': 'test_signing',
+        'install': 'bcdedit /set testsigning on  (then reboot; a security feature may still '
+                   'refuse the load)',
+        'est_minutes': 10,
+        'basis': 'observed',
+        'note': 'Prerequisite for loading your own driver. A reboot, and on some configurations '
+                'a policy that refuses regardless.',
+    },
+    'host:etw': {
+        'name': 'OS-level event tracing available',
+        'kind': 'host',
+        'probe': 'etw',
+        'install': 'included in Windows; kernel providers need the elevated atom',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'User-mode providers work without elevation; kernel events do not.',
+    },
+
+    # --- artifacts the host cannot install ------------------------------------
+    'artifact:sample': {
+        'name': 'the target binary (operator supplied)',
+        'kind': 'artifact',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'This repository ships no sample. Every target-behaviour claim is therefore '
+                'unverified until someone runs a route against one.',
+    },
+    'artifact:two_builds': {
+        'name': 'two builds of the same program',
+        'kind': 'artifact',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'Required by the build-diff route, and by signature migration across versions.',
+    },
+    'artifact:pdb': {
+        'name': 'a matching symbol file (PDB)',
+        'kind': 'artifact',
+        'est_minutes': 0,
+        'basis': 'unverified',
+        'note': 'Not generated by this repository. Where the vendor publishes one, it is the '
+                'cheapest route from an address to a name.',
+    },
+    'artifact:dumped_image': {
+        'name': 'a captured image of a running process',
+        'kind': 'artifact',
+        'est_minutes': 0,
+        'basis': 'observed',
+        'note': 'Produced by a capture route, not by this repository. A capture is bytes, not '
+                'the loader\'s work: repairing it is arithmetic over the section table.',
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Capabilities: what a task needs, expressed as atoms plus the capabilities it
+# depends on. `any_of` lists alternatives where one of them will do; the closure
+# is satisfied when a required alternative is present.
+# ---------------------------------------------------------------------------
+CAPABILITIES = {
+    'pe_structure_read': {
+        'name': 'Read a PE image\'s structure',
+        'required': ['python39', 'file:peutil.py'],
+        'scripts': ['peutil.py'],
+        'note': 'Headers, sections, directories, imports, exports, resources, TLS, relocations '
+                'and the checksum, offline and dependency-free.',
+    },
+    'pe_triage': {
+        'name': 'Triage an unknown image into signals',
+        'required': ['python39', 'file:pe_triage.py'],
+        'depends_on': ['pe_structure_read'],
+        'scripts': ['pe_triage.py'],
+        'note': 'Identity, build evidence, protective signals with their measurements, and a '
+                'next-action list. Signals, never verdicts.',
+    },
+    'equal_length_patch': {
+        'name': 'Apply a verified equal-length byte patch',
+        'required': ['python39', 'file:pepatch.py'],
+        'depends_on': ['pe_structure_read'],
+        'scripts': ['pepatch.py'],
+        'note': 'Read-only input, a new output file, an ambiguity guard, checksum recomputation, '
+                'and every patched byte re-read from the written file.',
+    },
+    'aob_locate': {
+        'name': 'Locate a byte pattern and judge the pattern',
+        'required': ['python39', 'file:aob_scan.py'],
+        'depends_on': ['pe_structure_read'],
+        'scripts': ['aob_scan.py'],
+        'note': 'Reports the hit count and a verdict, so a pattern that is a coin flip is '
+                'visible before it is used as a locator.',
+    },
+    'build_compare': {
+        'name': 'Compare two builds of the same program',
+        'required': ['python39', 'file:pe_diff.py', 'artifact:two_builds'],
+        'depends_on': ['pe_structure_read'],
+        'scripts': ['pe_diff.py'],
+        'note': 'Content-hash comparison with the volatile header fields normalised, so a '
+                'same-size replacement is caught and a rebuild is not reported as a change.',
+    },
+    'fixture_generation': {
+        'name': 'Build a synthetic PE fixture offline',
+        'required': ['python39', 'file:make_fixture_pe.py'],
+        'scripts': ['make_fixture_pe.py'],
+        'note': 'Deterministic, byte-reproducible images carrying the awkward cases on purpose. '
+                'No third-party sample is needed to exercise any parser here.',
+    },
+    'identity_scan': {
+        'name': 'Scan a tree for target identity before publishing',
+        'required': ['python39', 'file:scan_leaks.py'],
+        'scripts': ['scan_leaks.py'],
+        'note': 'Rules with their exemptions, findings with their context, and an exit code that '
+                'can gate a commit.',
+    },
+    'host_capability_probe': {
+        'name': 'Report what this host can actually support',
+        'required': ['python39', 'file:hwprobe.py'],
+        'scripts': ['hwprobe.py'],
+        'note': 'Processor features read from the processor, OS and policy facts, the tool '
+                'inventory, and a per-route verdict in three states.',
+    },
+
+    # --- static analysis beyond what this kit ships ---------------------------
+    'static_disassembly': {
+        'name': 'Disassemble or decompile with a full engine',
+        'required': ['python39'],
+        'any_of': ['tool:ghidra', 'tool:ida', 'tool:binaryninja', 'tool:radare2', 'tool:rizin',
+                   'tool:objdump'],
+        'note': 'One of these is enough. The GUI-only ones are for a human; the ones with a '
+                'documented non-interactive entry point are what an unattended run should use.',
+    },
+    'managed_inspect': {
+        'name': 'Inspect or change a managed assembly',
+        'required': ['python39'],
+        'any_of': ['tool:ildasm', 'tool:ilasm', 'tool:dotnet'],
+        'note': 'A managed assembly is a different artifact: the logic is CIL and metadata, and '
+                'editing bytes without updating the tables produces something that loads and '
+                'does the wrong thing.',
+    },
+    'installer_inspect': {
+        'name': 'Get at an installer\'s payload without running it',
+        'required': ['python39'],
+        'any_of': ['tool:innoextract', 'tool:7z', 'tool:strings', 'tool:radare2'],
+        'note': 'The container type decides the route, and the interesting binary may not exist on '
+                'disk until a particular step of the install runs. Extract first, then re-triage '
+                'what came out: it is a new unknown, not the same target.',
+    },
+    'flutter_static': {
+        'name': 'Read a Flutter application\'s compiled Dart',
+        'required': ['python39', 'file:dart_snapshot_strings.py'],
+        'note': 'Literals are recoverable from the snapshot with nothing installed, which is '
+                'usually enough to name the feature and the tier vocabulary. Locating the code that '
+                'uses a literal needs the object pool parsed, and that needs version-matched '
+                'tooling this repository does not ship.',
+    },
+
+    # --- dynamic routes -------------------------------------------------------
+    'interactive_debug': {
+        'name': 'Debug interactively',
+        'required': ['artifact:sample'],
+        'any_of': ['tool:x64dbg', 'tool:windbg'],
+        'note': 'A human at the keyboard. Useful and not scriptable; ask for it rather than '
+                'substituting a weaker method.',
+    },
+    'commandline_debug': {
+        'name': 'Debug unattended, or read a dump, from a command',
+        'required': ['artifact:sample'],
+        'any_of': ['tool:cdb', 'tool:windbg', 'tool:gdb'],
+        'note': 'A process or a dump plus a command string, output to stdout. This is the shape '
+                'an agent can drive.',
+    },
+    'runtime_instrumentation': {
+        'name': 'Instrument a live process',
+        'required': ['module:frida', 'artifact:sample'],
+        'any_of': ['tool:frida', 'module:frida'],
+        'note': 'A hook is a modification, so it changes what is being observed. Count the calls '
+                'an effect produces rather than only redirecting them.',
+    },
+    'hardware_breakpoint': {
+        'name': 'Stop or watch without modifying the bytes',
+        'required': ['host:debug_registers', 'artifact:sample'],
+        'depends_on': ['commandline_debug'],
+        'note': 'The point of this route is that it leaves no byte changed, so a code check does '
+                'not notice it. Data watches are width-limited and must be aligned, and there is '
+                'no read-only data watch.',
+    },
+    'intel_pt_capture': {
+        'name': 'Record an instruction trace with hardware assistance',
+        'required': ['host:intel_pt_cpu'],
+        'note': 'The processor reports the feature; reaching the trace output needs a driver or '
+                'an undocumented interface, which is the actual constraint. Treat capture, not '
+                'decoding, as the open question.',
+    },
+    'ttd_record': {
+        'name': 'Record a user-mode session for replay',
+        'required': ['tool:ttd', 'host:elevated', 'artifact:sample'],
+        'note': 'The only documented single-machine instruction-level route here. User-mode only, '
+                'the recording is large, and replay is read-only.',
+    },
+    'dump_capture': {
+        'name': 'Capture a process\'s memory',
+        'required': ['artifact:sample'],
+        'any_of': ['tool:procdump', 'commandline_debug'],
+        'note': 'Needs the rights to read the process. A minidump and a full dump answer '
+                'different questions, and the largest minidump is not the smallest full one.',
+    },
+    'dump_repair': {
+        'name': 'Turn a capture back into something loadable',
+        'required': ['artifact:dumped_image'],
+        'depends_on': ['pe_structure_read'],
+        'any_of': ['tool:scylla', 'file:peutil.py'],
+        'note': 'Mapping each section back to a file offset, restoring a wiped header, and '
+                'rebuilding what the loader did. A dump that reads fine can still refuse to load.',
+    },
+
+    # --- system and kernel ----------------------------------------------------
+    'etw_capture': {
+        'name': 'Record OS-level events',
+        'required': ['host:etw'],
+        'any_of': ['tool:wpr', 'tool:logman', 'tool:xperf'],
+        'note': 'Kernel providers need the elevated atom. The documented problem is loss '
+                'accounting and a single active session, not raw overhead.',
+    },
+    'kernel_debug': {
+        'name': 'Debug a kernel component',
+        'required': ['host:test_signing', 'host:elevated'],
+        'any_of': ['tool:windbg', 'tool:cdb'],
+        'note': 'On a current host this means a second machine, or a boot configuration change. '
+                'Local-only debugging cannot stop the target.',
+    },
+    'kernel_driver_load': {
+        'name': 'Load instrumentation of your own into the kernel',
+        'required': ['host:test_signing', 'host:elevated', 'host:hypervisor_free'],
+        'depends_on': ['kernel_debug'],
+        'note': 'Every one of these gates is real, and the last one is not installable: a '
+                'security feature may refuse an unsigned driver regardless of the boot setting.',
+    },
+    'hypervisor_observe': {
+        'name': 'Observe from below the operating system',
+        'required': ['kernel_driver_load'],
+        'note': 'What an ordinary observer cannot see, and also what can intercept an ordinary '
+                'observer. This repository documents the route and ships no hypervisor.',
+    },
+
+    # --- algorithmic reduction ------------------------------------------------
+    'symbolic_reduce': {
+        'name': 'Reduce a trace or a condition with a solver',
+        'required': ['module:z3', 'artifact:sample'],
+        'any_of': ['module:triton', 'module:angr', 'module:unicorn'],
+        'note': 'The reduction step is cheap; the environment model is not. A model returned is '
+                'not the same as an answer validated against the target\'s own outputs.',
+    },
+    'licence_classification': {
+        'name': 'Classify a licence mechanism before touching it',
+        'required': ['python39'],
+        'note': 'No tool is needed for the classification itself, which is why it is a capability '
+                'of the written material rather than of an install.',
+    },
+    'algorithm_recovery': {
+        'name': 'Recover a key, hash or licence algorithm',
+        'required': ['artifact:sample'],
+        'depends_on': ['static_disassembly'],
+        'note': 'Identify from constants and tables before reversing instruction by instruction; '
+                'validate the candidate against the target\'s own outputs.',
+    },
+}
 
 
-def load_hwprobe():
-    """(module, error). Imported lazily so that --list and --explain have no side effects."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    if here not in sys.path:
-        sys.path.insert(0, here)
-    try:
-        import hwprobe
-        return hwprobe, None
-    except Exception as exc:                      # pragma: no cover - depends on the checkout
-        return None, '%s: %s' % (type(exc).__name__, exc)
+def _all_atoms():
+    """Every atom id a capability refers to, in a stable order."""
+    seen = []
+    for cap in CAPABILITIES.values():
+        for key in ('required', 'any_of'):
+            for atom in cap.get(key, []):
+                if atom not in seen:
+                    seen.append(atom)
+        for dep in cap.get('depends_on', []):
+            if dep not in seen:
+                seen.append(dep)
+    return seen
 
 
-def tool_index(hw):
-    """{name: path} from hwprobe's tool rows.
+def extra_tool_dirs():
+    """Directories to search in addition to PATH.
 
-    hwprobe.probe_tools() returns the reason and the resolved path per row but not the tool name,
-    so the name is recovered from the basename. A tool that resolves to an unexpected file name is
-    reported as missing rather than as present; that direction of error is the safe one, because a
-    capability wrongly reported present is what sends a plan down a route the host cannot support.
+    Written this way because a tool that is installed off PATH is not a missing tool: SDKs,
+    versioned installs and unpacked archives all live somewhere nothing adds to the search
+    path. The variable is read on every call so a caller can set it before constructing a
+    probe.
     """
-    index = {}
-    for row in hw.probe_tools([]):
-        if row.get('state') != 'available' or not row.get('value'):
+    dirs = []
+    for var in ('EXEREV_TOOLS', 'EXE_REVERSE_TOOLS'):
+        raw = os.environ.get(var)
+        if raw:
+            dirs.extend(p for p in raw.split(os.pathsep) if p)
+    return dirs
+
+
+class Probe(object):
+    """Answers "is this atom present" by measuring, never by importing or executing.
+
+    Every probe is cached, because a capability closure asks the same question repeatedly and
+    a probe that spawns a process should answer once.
+    """
+
+    def __init__(self, tool_dirs=None):
+        self.tool_dirs = list(tool_dirs) if tool_dirs is not None else extra_tool_dirs()
+        self._cache = {}
+        self._host = None
+
+    # --- primitives -------------------------------------------------------
+    def which(self, name):
+        """Resolve an executable, then a file of that name under the extra directories."""
+        key = ('which', name)
+        if key in self._cache:
+            return self._cache[key]
+        found = shutil.which(name)
+        via = 'PATH' if found else None
+        if not found:
+            for d in self.tool_dirs:
+                for ext in ('', '.exe', '.cmd', '.bat', '.py'):
+                    cand = os.path.join(d, name + ext)
+                    if os.path.isfile(cand):
+                        found, via = cand, 'EXEREV_TOOLS'
+                        break
+                if found:
+                    break
+        self._cache[key] = (found, via)
+        return found, via
+
+    def have_module(self, name):
+        key = ('module', name)
+        if key not in self._cache:
+            try:
+                self._cache[key] = importlib.util.find_spec(name) is not None
+            except (ImportError, ValueError):
+                self._cache[key] = False
+        return self._cache[key]
+
+    def host(self):
+        """Host facts, taken from the probe this kit already ships.
+
+        Imported lazily and never executed as a subprocess: the probe is a module, and its
+        CPUID reader is the same code path `hwprobe.py` uses when run directly.
+        """
+        if self._host is None:
+            try:
+                if HERE not in sys.path:
+                    sys.path.insert(0, HERE)
+                import hwprobe
+                with hwprobe.Cpuid() as cpuid:
+                    rows, _raw = hwprobe.probe_cpu(cpuid)
+                os_rows = hwprobe.probe_os()
+                priv_rows = hwprobe.probe_privilege()
+                self._host = {'cpu': rows, 'os': os_rows, 'privilege': priv_rows}
+            except Exception as exc:                      # pragma: no cover - host dependent
+                self._host = {'error': str(exc)}
+        return self._host
+
+    def _host_flag(self, kind):
+        """One of the probed host facts, as a tri-state: True / False / None (unknown)."""
+        h = self.host()
+        if 'error' in h:
+            return None
+
+        def row_value(rows, needle):
+            for r in rows:
+                if needle.lower() in (r.get('note') or '').lower():
+                    return r.get('value')
+            return None
+
+        if kind == 'elevation':
+            return row_value(h['privilege'], 'TokenElevation')
+        if kind == 'hypervisor':
+            v = row_value(h['cpu'], 'ECX[31]')
+            return None if v is None else (not v)
+        if kind == 'intel_pt':
+            return row_value(h['cpu'], 'EBX[25]')
+        if kind == 'breakpoints':
+            # The architecture provides the registers; whether they reach your handler on a
+            # machine with a hypervisor under it is the open question, so the atom is true
+            # only when no virtualisation layer reports itself.
+            hyp = row_value(h['cpu'], 'ECX[31]')
+            return None if hyp is None else (not hyp)
+        if kind == 'test_signing':
+            v = row_value(h['os'], 'SystemStartOptions')
+            if v is None:
+                return None
+            return 'testsigning' in v if isinstance(v, list) else False
+        if kind == 'etw':
+            return bool(self.which('wpr')[0] or self.which('logman')[0])
+        return None
+
+    # --- per-atom ---------------------------------------------------------
+    def atom(self, atom_id):
+        if atom_id in self._cache:
+            return self._cache[atom_id]
+        spec = ATOMS.get(atom_id)
+        if spec is None:
+            self._cache[atom_id] = {'ok': False, 'detail': 'atom is not defined'}
+            return self._cache[atom_id]
+
+        kind = spec.get('kind')
+        result = {'ok': False, 'detail': ''}
+
+        if kind == 'python':
+            v = sys.version_info
+            result = {'ok': v >= (3, 9), 'detail': 'python %d.%d.%d' % v[:3]}
+        elif kind == 'module':
+            ok = self.have_module(spec['module'])
+            result = {'ok': ok, 'detail': spec['module'] + (' importable' if ok
+                                                            else ' not importable')}
+        elif kind == 'tool':
+            names = [spec['tool']] + list(spec.get('alternatives', []))
+            for n in names:
+                path, via = self.which(n)
+                if path:
+                    result = {'ok': True, 'detail': '%s (%s)' % (path, via)}
+                    break
+            else:
+                result = {'ok': False, 'detail': 'none of: ' + ', '.join(names)}
+        elif kind == 'file':
+            path = os.path.join(HERE, spec['script'])
+            result = {'ok': os.path.isfile(path), 'detail': path}
+        elif kind == 'host':
+            v = self._host_flag(spec.get('probe'))
+            if v is None:
+                result = {'ok': False, 'detail': 'unknown (the probe could not answer)'}
+            else:
+                result = {'ok': bool(v),
+                          'detail': 'measured' if v else 'not available on this host'}
+        elif kind == 'artifact':
+            result = {'ok': False, 'detail': 'operator supplied; not detectable from here'}
+
+        self._cache[atom_id] = result
+        return result
+
+
+def closure(capability_id):
+    """The capability plus everything it transitively depends on, de-duplicated, ordered."""
+    out, stack = [], [capability_id]
+    while stack:
+        cid = stack.pop(0)
+        if cid in out:
             continue
-        base = os.path.basename(str(row['value'])).lower()
-        for ext in ('.exe', '.cmd', '.bat', '.py'):
-            if base.endswith(ext):
-                base = base[:-len(ext)]
-                break
-        index.setdefault(base, str(row['value']))
-    return index
+        out.append(cid)
+        for dep in CAPABILITIES.get(cid, {}).get('depends_on', []):
+            if dep not in out:
+                stack.append(dep)
+    return out
 
 
-def probe_host():
-    """Measure the facts the registry's detect rules read. Reuses hwprobe throughout."""
-    facts = {
-        'python': sys.version.split()[0],
-        'platform': platform.platform(),
-        'windows': platform.system() == 'Windows',
-        'tools': {},
-        'modules': {},
-        'cpu': {'hypervisor': None, 'intel_pt': None, 'family_model': None, 'reason': None},
-        'privilege': {'elevated': None},
-        'os': {'build': None, 'boot_flags': [], 'device_guard': {}},
-        'probe': {'available': False, 'reason': None},
+def resolve(capability_id, probe=None):
+    """Resolve one capability: its own atoms, its alternatives, and its dependencies."""
+    probe = probe or Probe()
+    spec = CAPABILITIES.get(capability_id)
+    if spec is None:
+        return None
+    chain = closure(capability_id)
+
+    missing_atoms = []
+    for atom in spec.get('required', []):
+        r = probe.atom(atom)
+        if not r['ok']:
+            missing_atoms.append((atom, r['detail']))
+
+    alternatives = spec.get('any_of', [])
+    alt_state = None
+    if alternatives:
+        present = [a for a in alternatives if probe.atom(a)['ok']]
+        alt_state = present
+        if not present:
+            missing_atoms.append(('any_of(' + ','.join(alternatives) + ')',
+                                  'none present: ' + ', '.join(
+                                      '%s [%s]' % (a, probe.atom(a)['detail'])
+                                      for a in alternatives)))
+
+    blocked_deps = []
+    for dep in spec.get('depends_on', []):
+        sub = resolve(dep, probe)
+        if sub and sub['state'] != 'ok':
+            blocked_deps.append((dep, sub['state']))
+
+    ok = not missing_atoms and not blocked_deps
+    state = 'ok' if ok else ('blocked' if (missing_atoms or blocked_deps) else 'ok')
+    return {
+        'id': capability_id,
+        'name': spec.get('name', capability_id),
+        'state': state,
+        'required': spec.get('required', []),
+        'any_of': alternatives,
+        'alternatives_present': alt_state,
+        'depends_on': spec.get('depends_on', []),
+        'blocked_deps': blocked_deps,
+        'missing': missing_atoms,
+        'closure': chain,
+        'scripts': spec.get('scripts', []),
+        'note': spec.get('note', ''),
     }
-    hw, err = load_hwprobe()
-    if hw is None:
-        facts['probe']['reason'] = ('hwprobe.py could not be imported: %s' % err)
-        return facts
-    facts['probe'] = {'available': True, 'reason': None}
-
-    facts['tools'] = tool_index(hw)
-    for row in hw.python_modules():
-        facts['modules'][str(row['value'])] = (row['state'] == 'available')
-
-    for row in hw.probe_os():
-        note = row.get('note') or ''
-        if 'CurrentVersion registry' in note:
-            facts['os']['build'] = row.get('value')
-        elif note == 'SystemStartOptions boot flags':
-            value = row.get('value')
-            facts['os']['boot_flags'] = list(value) if isinstance(value, list) else []
-        elif 'EnableVirtualizationBasedSecurity' in note:
-            facts['os']['device_guard']['vbs'] = row.get('value')
-        elif 'HypervisorEnforcedCodeIntegrity' in note:
-            facts['os']['device_guard']['hvci'] = row.get('value')
-        elif 'CredentialGuard' in note:
-            facts['os']['device_guard']['credential_guard'] = row.get('value')
-
-    for row in hw.probe_privilege():
-        if 'TokenElevation' in (row.get('note') or ''):
-            facts['privilege']['elevated'] = row.get('value')
-
-    with hw.Cpuid() as cpuid:
-        if not cpuid.available:
-            facts['cpu']['reason'] = cpuid.reason
-        else:
-            rows, _raw = hw.probe_cpu(cpuid)
-            for row in rows:
-                note = row.get('note') or ''
-                if 'ECX[31]' in note:
-                    facts['cpu']['hypervisor'] = row.get('value')
-                elif 'EBX[25]' in note:
-                    facts['cpu']['intel_pt'] = row.get('value')
-                elif note == 'CPUID.01H':
-                    facts['cpu']['family_model'] = row.get('value')
-    return facts
 
 
-def capability_state(cap, facts):
-    """(state, reason). Every state is derived from a measurement or reported as unknown."""
-    kind, arg = cap['detect']
-    if kind == 'python':
-        return 'available', 'this interpreter: Python %s' % facts['python']
-    if kind == 'windows':
-        return (('available' if facts['windows'] else 'unavailable'),
-                'platform.system() = %s' % platform.system())
-    if kind == 'tool':
-        hits = [t for t in arg if facts['tools'].get(t)]
-        if hits:
-            found = ', '.join('%s (%s)' % (h, facts['tools'][h]) for h in hits[:2])
-            return 'available', 'found: %s' % found
-        if not facts['probe']['available']:
-            return 'unknown', facts['probe']['reason']
-        if len(arg) == 1:
-            return 'needs-%s' % arg[0], ('%s is not on PATH; the inventory behind this row is '
-                                         'hwprobe.probe_tools()' % arg[0])
-        return 'needs-%s' % arg[0], ('none of %s resolved on PATH; the inventory behind this row '
-                                     'is hwprobe.probe_tools()' % ', '.join(arg))
-    if kind == 'module':
-        got = facts['modules'].get(arg)
-        if not facts['probe']['available']:
-            return 'unknown', facts['probe']['reason']
-        if got is True:
-            return 'available', 'importable: %s (hwprobe.python_modules)' % arg
-        if got is False:
-            return 'needs-%s' % arg, '%s is not importable on this interpreter' % arg
-        return 'unknown', 'the module probe reported nothing for %s' % arg
-    if kind == 'cpu':
-        value = facts['cpu'].get(arg)
-        if value is None:
-            return 'unknown', (facts['cpu']['reason'] or 'the CPUID probe returned no value for %s'
-                               % arg)
-        if arg == 'intel_pt':
-            measurement = 'CPUID.07H.0:EBX[25] = %d' % int(bool(value))
-        else:
-            measurement = 'CPUID.01H:ECX[31] = %d (a hypervisor is running this host)' \
-                          % int(bool(value))
-        state_map = cap.get('state_map')
-        if state_map:
-            return state_map[bool(value)], measurement
-        return (('available' if value else 'unavailable')), measurement
-    if kind == 'privilege':
-        elevated = facts['privilege'].get('elevated')
-        if elevated is None:
-            return 'unknown', 'the token probe did not return an elevation state'
-        state = 'available' if elevated else 'needs-elevation'
-        return state, 'TokenElevation = %s, read through hwprobe' % bool(elevated)
-    if kind == 'boot':
-        flags = facts['os'].get('boot_flags') or []
-        if arg in flags:
-            return 'available', 'boot flag present: %s (SystemStartOptions)' % arg
-        return 'needs-%s' % arg, ('boot flags: %s' % (', '.join(flags) or 'none')
-                                  + '; a boot flag change needs a reboot')
-    return 'unknown', 'no probe is implemented for detect kind %r' % (kind,)
+def resolve_all(probe=None):
+    probe = probe or Probe()
+    return [resolve(cid, probe) for cid in CAPABILITIES]
 
 
-def capability_rows(facts):
-    rows = []
-    for cap in CAPABILITIES:
-        row = dict(cap)
-        if facts is None:
-            row['state'] = None
-            row['state_reason'] = 'not probed (pass --check)'
-        else:
-            state, reason = capability_state(cap, facts)
-            row['state'] = state
-            row['state_reason'] = reason
-        rows.append(row)
-    return rows
+def verdict(results):
+    blocked = [r for r in results if r['state'] != 'ok']
+    if not blocked:
+        return 'ok', 0
+    return 'blocked', EXIT_ENV
 
 
-def find_capability(cap_id):
-    for cap in CAPABILITIES:
-        if cap['id'] == cap_id:
-            return cap
-    return None
+# ---------------------------------------------------------------------------
+# Which capability does a script serve? Declared in the script where possible,
+# mapped here otherwise, and counted as unknown when neither applies.
+# ---------------------------------------------------------------------------
+SCRIPT_CAPABILITIES = {
+    'peutil.py': ['pe_structure_read'],
+    'pe_triage.py': ['pe_triage'],
+    'pepatch.py': ['equal_length_patch'],
+    'aob_scan.py': ['aob_locate'],
+    'pe_diff.py': ['build_compare'],
+    'hwprobe.py': ['host_capability_probe'],
+    'make_fixture_pe.py': ['fixture_generation'],
+    'scan_leaks.py': ['identity_scan'],
+    'capabilities.py': ['host_capability_probe'],
+    'doctor.py': ['host_capability_probe'],
+}
 
 
-def print_table(rows):
-    print('%-34s %-22s %-20s %s' % ('capability', 'needs', 'script', 'reference'))
-    for row in rows:
-        print('%-34s %-22s %-20s %s' % (row['id'], row['needs_short'], row['script'] or '-',
-                                        row['reference']))
-    print('\n%d capabilities. `--check` probes this host; `--explain <id>` gives one row in full.'
-          % len(rows))
+def declared_capability(path):
+    """Read a `capability: <id>[, <id>]` line from the first line of a script's docstring.
+
+    Static, so a script never has to run to be classified. Returns [] when there is no
+    declaration, which is not the same as declaring none.
+
+    The match is deliberately strict -- plain identifiers only. A looser one accepted the
+    documentation of this convention, which lives in *this* file's own docstring, and reported
+    the registry as declaring `capability: <capability_id>[, <capability_id>]`. A declaration
+    that is a template is not a declaration.
+    """
+    try:
+        with open(path, encoding='utf-8') as fh:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError):
+        return []
+    doc = ast.get_docstring(tree) or ''
+    for line in doc.splitlines():
+        m = _DECLARATION_RE.match(line.strip())
+        if m:
+            return [c.strip() for c in m.group(1).split(',') if c.strip()]
+    return []
 
 
-def print_check(rows):
-    print('capability check on this host')
-    width = max(len(r['id']) for r in rows)
-    for row in rows:
-        print('  %-*s  %-28s %s' % (width, row['id'], row['state'], row['script'] or '-'))
-        print('  %-*s  %s' % (width, '', row['state_reason']))
-    counts = {}
-    for row in rows:
-        key = row['state'] if row['state'] in ('available', 'unknown') else (
-            'needs-something' if str(row['state']).startswith('needs-') else 'unavailable')
-        counts[key] = counts.get(key, 0) + 1
-    print('\n%d capabilities: %s' % (len(rows), ', '.join('%s=%d' % kv
-                                                          for kv in sorted(counts.items()))))
-    print('A capability this host lacks is a finding about the machine, not a failure of the task, '
-          'and it never changes the exit code.')
+def capabilities_for_script(name, path=None):
+    """(ids, source) where source is 'declared', 'mapped' or 'unknown'."""
+    path = path or os.path.join(HERE, name)
+    declared = declared_capability(path)
+    if declared:
+        return declared, 'declared'
+    mapped = SCRIPT_CAPABILITIES.get(name)
+    if mapped:
+        return mapped, 'mapped'
+    return [], 'unknown'
 
 
-def print_explain(cap):
-    print('%s' % cap['id'])
-    print('  what       : %s' % cap['what'])
-    print('  needs      : %s' % cap['needs'])
-    print('  detect     : %s' % describe_detect(cap['detect']))
-    print('  script     : %s' % (cap['script'] or '(no script: this route is driven by a person or '
-                                                  'external tooling)'))
-    print('  reference  : %s' % cap['reference'])
-    print('  boundary   : %s' % cap['boundary'])
-    print('  host state : not measured here; run --check (this command has no side effects)')
+def human_report(results, verbose=False):
+    lines = []
+    width = max(len(r['name']) for r in results) if results else 10
+    for r in results:
+        mark = 'ok ' if r['state'] == 'ok' else 'BLK'
+        lines.append('  %s %-*s  %s' % (mark, width, r['name'], r['id']))
+        if verbose and r['state'] != 'ok':
+            for atom, detail in r['missing']:
+                spec = ATOMS.get(atom, {})
+                lines.append('        missing atom : %s' % atom)
+                lines.append('        detail       : %s' % detail)
+                if spec.get('install'):
+                    lines.append('        next action  : %s' % spec['install'])
+                if spec.get('est_minutes') is not None:
+                    lines.append('        est. minutes : %s (basis: %s)'
+                                 % (spec['est_minutes'], spec.get('basis', 'unverified')))
+            for dep, state in r['blocked_deps']:
+                lines.append('        blocked by   : %s (%s)' % (dep, state))
+    return lines
 
 
-def describe_detect(detect):
-    kind, arg = detect
-    if kind == 'python':
-        return 'the interpreter running this script'
-    if kind == 'tool':
-        return 'any of %s resolved on PATH' % ', '.join(arg)
-    if kind == 'module':
-        return '%s importable by this interpreter' % arg
-    if kind == 'cpu':
-        return 'CPUID bit %s, read through hwprobe' % arg
-    if kind == 'privilege':
-        return 'the process token\'s elevation state, read through hwprobe'
-    if kind == 'boot':
-        return 'the %s boot flag in SystemStartOptions, read through hwprobe' % arg
-    return 'no probe implemented'
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        sys.stderr.write('error: %s\n' % message)
+        sys.exit(EXIT_USE)
 
 
-def main():
-    ap = argparse.ArgumentParser(
-        description='The capability registry for this skill: what each route needs, how to detect '
-                    'it here, and which script and reference cover it.',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='Example:\n  python capabilities.py --check')
-    ap.add_argument('--list', action='store_true', help='print the registry table')
-    ap.add_argument('--check', action='store_true',
-                    help='probe this host and report available / needs-x / unavailable / unknown')
-    ap.add_argument('--explain', metavar='ID', help='one capability in full, including its boundary')
-    ap.add_argument('--json', action='store_true', help='emit the registry as JSON')
-    args = ap.parse_args()
+def main(argv=None):
+    ap = _Parser(description='Capability registry: what this host can actually do, and what '
+                             'to do about what it cannot.')
+    ap.add_argument('capability', nargs='?', help='one capability id')
+    ap.add_argument('--verbose', action='store_true', help='detail on what is missing')
+    ap.add_argument('--list', action='store_true', help='ids and names only')
+    ap.add_argument('--json', action='store_true', help='machine-readable')
+    ap.add_argument('--tools-dir', action='append', default=[],
+                    help='extra directory to search for tools (repeatable)')
+    args = ap.parse_args(argv)
 
-    if not (args.list or args.check or args.explain or args.json):
-        ap.error('choose one of --list, --check, --explain ID or --json')
+    probe = Probe(tool_dirs=(args.tools_dir or None))
 
-    if args.explain and find_capability(args.explain) is None:
-        sys.stderr.write('error: unknown capability id %r\n' % args.explain)
-        sys.stderr.write('known ids: %s\n' % ', '.join(sorted(c['id'] for c in CAPABILITIES)))
-        return 3
+    if args.list:
+        for cid, spec in CAPABILITIES.items():
+            print('  %-26s %s' % (cid, spec.get('name', '')))
+        print('\n%d capabilities.' % len(CAPABILITIES))
+        print('RESULT=%s' % TOKENS['ok'])
+        return EXIT_OK
 
-    facts = probe_host() if args.check else None
-    rows = capability_rows(facts)
-
-    if args.explain:
+    if args.capability:
+        if args.capability not in CAPABILITIES:
+            sys.stderr.write('error: no such capability: %s\n' % args.capability)
+            print('RESULT=%s' % TOKENS['use'])
+            return EXIT_USE
+        results = [resolve(args.capability, probe)]
         if args.json:
-            print(json.dumps(find_capability(args.explain), indent=2, ensure_ascii=True))
-        else:
-            print_explain(find_capability(args.explain))
-        return 0
+            print(json.dumps(results[0], indent=2))
+            print('RESULT=%s' % TOKENS[verdict(results)[0]])
+            return verdict(results)[1]
+        print('capability: %s' % results[0]['name'])
+        print('scripts   : %s' % (', '.join(results[0]['scripts']) or '-'))
+        print('requires  : %s' % ', '.join(results[0]['required']))
+        if results[0]['any_of']:
+            print('any of    : %s' % ', '.join(results[0]['any_of']))
+            print('present   : %s' % (', '.join(results[0]['alternatives_present']) or 'none'))
+        if results[0]['depends_on']:
+            print('depends on: %s' % ', '.join(results[0]['depends_on']))
+        print('state     : %s' % results[0]['state'])
+        for line in human_report(results, verbose=True):
+            print(line)
+        if results[0]['note']:
+            print('note      : %s' % results[0]['note'])
+        v, rc = verdict(results)
+        print('RESULT=%s' % TOKENS[v])
+        return rc
 
+    results = resolve_all(probe)
     if args.json:
-        payload = {
-            'python': sys.version.split()[0],
-            'platform': platform.platform(),
-            'probe': (facts['probe'] if facts else {'available': False,
-                                                    'reason': 'not probed (no --check)'}),
-            'host': ({'tools_found': len(facts['tools']),
-                      'modules_available': sorted(m for m, ok in facts['modules'].items() if ok),
-                      'cpu': facts['cpu'], 'privilege': facts['privilege'], 'os': facts['os']}
-                     if facts else None),
-            'capabilities': rows,
-            'states': {r['id']: r['state'] for r in rows},
-        }
-        print(json.dumps(payload, indent=2, ensure_ascii=True))
-        return 0
-
-    if args.check:
-        print_check(rows)
-    else:
-        print_table(rows)
-    return 0
+        print(json.dumps(results, indent=2))
+        v, rc = verdict(results)
+        print('RESULT=%s' % TOKENS[v])
+        return rc
+    print('capability registry -- %d capabilities' % len(results))
+    for line in human_report(results, verbose=args.verbose):
+        print(line)
+    ok = sum(1 for r in results if r['state'] == 'ok')
+    print('\n%d ok, %d blocked' % (ok, len(results) - ok))
+    v, rc = verdict(results)
+    print('RESULT=%s' % TOKENS[v])
+    return rc
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(EXIT_INTERNAL)

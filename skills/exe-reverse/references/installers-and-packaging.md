@@ -101,6 +101,48 @@ For a self-extracting wrapper, the equivalent logging switch from the documented
 `/log:[path to log file]`, and the package's own quiet switches (`/quiet`, `/passive`,
 `/norestart`, `/forcerestart`) change how much of the install you will see happen.
 
+### A worked extraction, measured end to end
+
+An Inno Setup installer does not declare itself in a header the way a package format does, but its
+shape is unmistakable in the triage report, and every signal below is a field the report already
+prints. `observed`, on one 31,059,248-byte installer:
+
+| Signal | Observed | Why it identifies this builder |
+|---|---|---|
+| Exported module | `SetupLdr.exe` | the setup loader's own name, exported from a program that should not export anything |
+| A section named | `.itext` | not a name a C or C++ toolchain emits |
+| Entry point | inside `.itext`, not the first code section | stubs run before the program proper |
+| Toolchain | linker 2.25, **no Rich Header** | not an MSVC build, consistent with a stripped non-MSVC toolchain |
+| Strings | `Inno Setup`, `SetupLdr`, `rDlPtS`, `zlb`, `LZMA1` | the product name, the loader, the data identifier, and two compression markers |
+
+Extraction, with a purpose-built extractor rather than by running the installer:
+
+```
+winget install --id dscharrer.innoextract
+innoextract --info    installer.exe                  # names the product and the setup data version
+innoextract --list    installer.exe                  # payload inventory; nothing is written
+innoextract --extract --output-dir OUT installer.exe
+```
+
+Measured on that target: `--info` reported the product name and `setup data version 6.1.0
+(unicode)`; `--list` returned 158 entries; the extract finished in 9.2 s and produced 155 files
+(87.6 MB), including a 26.8 MB `app/data/app.so`. `observed`.
+
+**A version banner is a signal about the tool, not a verdict on your file.** This extractor's own
+banner declares support up to setup data 6.0.5, and it listed and extracted a 6.1.0 image without
+complaint. The honest sequence is to run the extraction and read the result, rather than to rule a
+tool out from its documentation — and equally, not to promise a target will work because the banner
+covers it.
+
+Two consequences that generalise past this one product:
+
+- **The download is not the program.** What came out was a launcher plus a Flutter payload, and the
+  behaviour of interest was in neither the launcher nor any of the DLLs beside it. Re-triage the
+  extracted tree as a new unknown: it is not the same target you started with.
+- **The payload can be a different file format from the container.** A Windows installer delivered an
+  **ELF** shared object. A workflow that assumes "extracted means PE" stops at that point; see
+  `flutter-and-dart-aot.md` for the shape it actually was.
+
 ## Where configuration and licence data end up
 
 Three destinations, and the distinction decides whether a patch survives later maintenance.

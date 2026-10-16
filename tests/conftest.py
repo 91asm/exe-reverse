@@ -18,6 +18,7 @@ import json
 import os
 import pathlib
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -30,6 +31,10 @@ SCRIPTS_DIR = REPO_ROOT / "skills" / "exe-reverse" / "scripts"
 # The scripts declare "Python 3.9+" in their own docstrings.
 MIN_PYTHON = (3, 9)
 
+# Every script this suite may load by name or run as a subprocess. The last three were added with
+# their own layers of the suite: the capability registry and the environment doctor answer questions
+# about this host, and the Dart snapshot reader takes an ELF rather than a PE, so its input is
+# generated here by `build_synthetic_elf` instead of by `make_fixture_pe.py`.
 SCRIPT_FILES = (
     "peutil.py",
     "pepatch.py",
@@ -37,6 +42,9 @@ SCRIPT_FILES = (
     "aob_scan.py",
     "make_fixture_pe.py",
     "scan_leaks.py",
+    "capabilities.py",
+    "doctor.py",
+    "dart_snapshot_strings.py",
 )
 
 # A hang detector, not a performance assertion. Nothing in this suite is meant to be slow.
@@ -143,6 +151,151 @@ EXEMPT_LINES = (
 # bare-GUID exemption matches inside the machine-guid rule's own match text. Pinned by a unit
 # test so a change in either list is visible instead of silent.
 SUPPRESSED_RULES = ("machine-guid",)
+
+
+# --- synthetic ELF64 for dart_snapshot_strings.py -----------------------------
+# That script's input is a Dart AOT snapshot -- an ELF shared object named `app.so` -- and this
+# repository may never carry a sample, not even a small one. So the suite builds the container
+# instead: a valid ELF64 header, a `.text` of a handful of bytes, a `.rodata` holding one one-byte
+# (ASCII) literal and one two-byte (UTF-16LE) literal at known offsets, and a section-name string
+# table. A few hundred bytes, written at test time into the session temporary directory.
+#
+# What this image is *not*: a Flutter snapshot. The counts the reader's own docstring records --
+# 110,641 pool loads and 5 self-relative loads in a real 26.8 MB `app.so` -- came from a real target
+# and cannot be reproduced from a generated file. The fixture exists to hold the reader against a
+# container whose offsets are known in advance, which is what proves the recovery and counting
+# logic; the real measurement stays a recorded observation in the script's docstring.
+
+# Neither `49 8B /r` (a pool load through r15) nor `4X 8B|8D 05` (a RIP-relative load) appears in
+# these bytes, which is what makes the zero counts below a measurement rather than an artifact.
+ELF_TEXT_BYTES = bytes((0x90, 0x90, 0xC3, 0xCC, 0x55, 0x48, 0x89, 0xE5,
+                        0x5D, 0xC3, 0x0F, 0x1F, 0x44, 0x00, 0x00, 0x90))
+ELF_TEXT_VADDR = 0x1000
+# Large enough that a virtual address is never mistaken for a file offset: the reader treats an
+# `--at` value above the file size as a vaddr, and this image is under 1 KiB.
+ELF_RODATA_VADDR = 0x400000
+
+# (offset within .rodata, vaddr offset, text, encoding). The ASCII run at 0x00 and the UTF-16LE run
+# at 0x1C are the two shapes the reader documents; the NUL pairs between them keep the two-byte
+# scan phase-aligned with the four-byte section base.
+ELF_LITERALS = (
+    (0x00, "premium_license", "one-byte"),
+    (0x10, "trial_mode", "one-byte"),
+    (0x1C, "vip_pass", "two-byte"),
+)
+
+
+def _elf_section_header(name_off, typ, flags, addr, offset, size, align=8, entsize=0,
+                        link=0, info=0):
+    """One 64-byte ELF64 section header, in the order the reader unpacks it."""
+    return struct.pack("<IIQQQQIIQQ", name_off, typ, flags, addr, offset, size,
+                       link, info, align, entsize)
+
+
+def build_synthetic_elf(with_text=True):
+    """(data, meta) for a minimal ELF64 whose `.rodata` holds three known literals.
+
+    The layout is derived here rather than asserted from a table, so a change to any literal's size
+    moves the offsets with it and the tests still compare against where the fixture *did* put them.
+    """
+    text = ELF_TEXT_BYTES
+    rodata = b"premium_license\x00" + b"trial_mode\x00\x00"
+    rodata += "vip_pass".encode("utf-16-le") + b"\x00\x00"
+    rodata += b"\x00" * ((8 - len(rodata) % 8) % 8)
+    shstr = b"\x00.text\x00.rodata\x00.shstrtab\x00"
+
+    ehdr_size = 64
+    text_off = 0x40
+    rodata_off = text_off + (len(text) if with_text else 0)
+    shstr_off = rodata_off + len(rodata)
+    shoff = shstr_off + len(shstr)
+    shoff += (8 - shoff % 8) % 8
+
+    sections = [
+        # The NULL section every image starts with; the reader does not special-case it.
+        _elf_section_header(0, 0, 0, 0, 0, 0, align=0),
+    ]
+    if with_text:
+        sections.append(_elf_section_header(1, 1, 0x6, ELF_TEXT_VADDR, text_off,
+                                            len(text)))
+    sections.append(_elf_section_header(7, 1, 0x2, ELF_RODATA_VADDR, rodata_off,
+                                       len(rodata)))
+    sections.append(_elf_section_header(15, 3, 0, 0, shstr_off, len(shstr), align=1))
+    shnum = len(sections)
+
+    ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + b"\x00" * 8
+    ehdr = ident + struct.pack("<HHIQQQIHHHHHH",
+                               3,             # e_type = ET_DYN, a shared object
+                               0x3E,          # e_machine = EM_X86_64
+                               1,             # e_version
+                               0,             # e_entry
+                               0,             # e_phoff: no program headers
+                               shoff,         # e_shoff
+                               0,             # e_flags
+                               ehdr_size,     # e_ehsize
+                               0,             # e_phentsize
+                               0,             # e_phnum
+                               64,            # e_shentsize
+                               shnum,         # e_shnum
+                               shnum - 1)     # e_shstrndx: the last section is .shstrtab
+
+    data = bytearray(b"\x00" * shoff)
+    data[0:ehdr_size] = ehdr
+    if with_text:
+        data[text_off:text_off + len(text)] = text
+    data[rodata_off:rodata_off + len(rodata)] = rodata
+    data[shstr_off:shstr_off + len(shstr)] = shstr
+    data.extend(b"".join(sections))
+
+    meta = {
+        "size": len(data),
+        "text": {"offset": text_off, "vaddr": ELF_TEXT_VADDR, "size": len(text)},
+        "rodata": {"offset": rodata_off, "vaddr": ELF_RODATA_VADDR, "size": len(rodata)},
+        "literals": [
+            {"offset": rodata_off + rel, "vaddr": ELF_RODATA_VADDR + rel,
+             "text": value, "encoding": encoding}
+            for rel, value, encoding in ELF_LITERALS
+        ],
+    }
+    return bytes(data), meta
+
+
+class SyntheticElf(object):
+    """A generated ELF image plus the offsets its literals were placed at."""
+
+    __slots__ = ("path", "data", "meta")
+
+    def __init__(self, path, data, meta):
+        self.path = path
+        self.data = data
+        self.meta = meta
+
+    @property
+    def size(self):
+        return len(self.data)
+
+    @property
+    def text(self):
+        return self.meta["text"]
+
+    @property
+    def rodata(self):
+        return self.meta["rodata"]
+
+    @property
+    def literals(self):
+        return self.meta["literals"]
+
+    def literal(self, value):
+        """The fixture record for one literal, by its text."""
+        for entry in self.literals:
+            if entry["text"] == value:
+                return entry
+        raise KeyError("%r is not one of the fixture's literals: %r"
+                       % (value, [e["text"] for e in self.literals]))
+
+    def __repr__(self):
+        return "SyntheticElf(%s, %d bytes)" % (self.path, self.size)
 
 
 def pytest_report_header(config):
@@ -337,6 +490,24 @@ def build_fixture(fixture_dir, load_script, run_script):
 def fixtures(build_fixture):
     """The four generated images, addressed as ``fixtures.pe64`` / ``fixtures['pe32']``."""
     return FixtureSet({name: build_fixture(name) for name in FIXTURE_RECIPES})
+
+
+@pytest.fixture(scope="session")
+def synthetic_elf(fixture_dir):
+    """The generated ELF64, written once for the whole session."""
+    data, meta = build_synthetic_elf()
+    path = fixture_dir / "app.so"
+    path.write_bytes(data)
+    return SyntheticElf(path, data, meta)
+
+
+@pytest.fixture(scope="session")
+def synthetic_elf_without_text(fixture_dir):
+    """The same image with no `.text`, for the reader's "not an AOT code image" path."""
+    data, meta = build_synthetic_elf(with_text=False)
+    path = fixture_dir / "no-text.so"
+    path.write_bytes(data)
+    return SyntheticElf(path, data, meta)
 
 
 @pytest.fixture(scope="session")

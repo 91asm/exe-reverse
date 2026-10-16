@@ -127,6 +127,7 @@ Load the named file **before your next command**, not after your next three atte
 | Your signature-based patch worked on one version and misses on the next | `references/aob-and-signatures.md` |
 | Two supposedly identical builds behave differently | `references/pe-diff-and-versions.md` |
 | The target is a .NET assembly and hex-patching it does nothing | `references/managed-dotnet.md` |
+| The payload holds a large `data/app.so` and hardly any native code | `references/flutter-and-dart-aot.md` |
 | The sample is an installer, and the interesting binary is nowhere on disk after install | `references/installers-and-packaging.md` |
 | The file is a driver, or it refuses to load without a driver present | `references/kernel-and-drivers.md` |
 | You need to observe a check without modifying anything, and every hook is detected | `references/hardware-tracing.md` |

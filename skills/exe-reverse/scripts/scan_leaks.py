@@ -156,12 +156,36 @@ EXEMPT_TERMS = [
                 r'MPRESS|Obsidium|Armadillo|ConfuserEx|SmartAssembly|\.NET Reactor|'
                 r'Eazfuscator|de4dot|ILSpy|dnSpy|dotPeek|ildasm|ilasm)\b'),
      'public protector/packer/managed tooling name'),
-    # format, API and standards vocabulary
+    # Installer builders and packagers. Naming one of these is the *result* of the analysis rather
+    # than the identity of the target: "the payload is a 6.1.0 archive from this builder" says how
+    # the artifact was made, and that is exactly what the reader needs in order to extract it.
+    # Only a name identifying the software under analysis is a leak. This class earned its own
+    # entry by producing a false positive: a builder's version number was reported as a product
+    # identity, which is the second time a legitimate evidence statement was read as a leak.
+    (re.compile(r'(?i)\b(?:Inno Setup|NSIS|InstallShield|WiX|WixToolset|Advanced Installer|'
+                r'MSI Factory|Squirrel|electron-builder|PyInstaller|py2exe|Nuitka|'
+                r'MSIX Packaging|Makeself|InstallAnywhere)\b'),
+     'installer builder or packager name (how the artifact was made, not whose it is)'),
+    # Format, API and standards vocabulary
     (re.compile(r'(?i)\b(?:IMAGE_[A-Z_]+|CPUID|MSR|IOCTL|IRP|PE32|PE32\+|Authenticode|'
                 r'RVA|RVA|PDB|RSDS|CodeView|Rich Header|TLS callback|IAT|EAT|CFG|'
                 r'CWE-\d+|MITRE|ECMA-335|CIL|CLR|ETW|TTD|VBS|HVCI|EPT|VT-x|'
                 r'WOW64|AppContainer|PPL|DR\d|PEB|TEB|SEH|VEH|APC|ToPA|PSB|TNT)\b'),
      'format, standard or platform term'),
+    # Package indexes and specification registries. A name plus a version here is a **citation**,
+    # not an identity: it says which artefact was installed or which specification was followed.
+    #
+    # This entry exists because the rule above it learned something three times. "A capitalised name
+    # bound to a version number" produced a false positive on a specification version, on an
+    # installer builder's version, and on a package-index version -- each time on a sentence a
+    # reader needs in order to reproduce the work. The lesson is worth stating plainly: that pattern
+    # is a **weak** signal, and whether a name is the target or the tooling is a judgement the
+    # person reading the report makes. The rule keeps firing because it also catches the real case
+    # (a product name in a path, a URL or a certificate subject); what it must not do is force a
+    # citation to be rewritten to satisfy it.
+    (re.compile(r'(?i)\b(?:PyPI|CRAN|NuGet|crates\.io|Maven Central|SMT-LIB|'
+                r'RFC\s?\d+|ISO\s?\d+|IEEE\s?\d+|NIST|CVE-\d{4}-\d+|TPM\s?\d)\b'),
+     'package index or specification registry name'),
     # Microsoft-owned identifiers that appear in every legitimate discussion
     (re.compile(r'(?i)\b(?:Windows|Microsoft|Redmond|Sysinternals|MSVC|MSBuild|Win32|'
                 r'NTFS|winnt\.h|ntddk|WDK|Windows SDK|Visual Studio|\.NET|PowerShell)\b'),
@@ -242,9 +266,15 @@ def iter_files(root, files_from=None):
                         yield p
         return
     for dirpath, dirnames, filenames in os.walk(root):
+        # A leading underscore marks a local work area, the same convention `.gitignore` uses. The
+        # two lists have to agree: when they did not, a research directory that the repository
+        # ignores still had its contents reported as findings, because it happened not to be in
+        # this hardcoded set. A scanner that reports on material which cannot be published teaches
+        # its reader to skim the result, which is worse than the noise itself.
         dirnames[:] = sorted(
             d for d in dirnames
-            if (d not in SKIP_DIRS and not d.startswith('.')) or d == '.github')
+            if not d.startswith('_')
+            and ((d not in SKIP_DIRS and not d.startswith('.')) or d == '.github'))
         for name in sorted(filenames):
             if name.lower().endswith(SKIP_FILE_SUFFIX):
                 continue

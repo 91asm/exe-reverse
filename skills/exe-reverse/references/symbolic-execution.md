@@ -189,10 +189,38 @@ second run of the same model produces the same wrong answer with more confidence
 
 ## What this file does not contain
 
-- No tool names, no command lines and no solver options. The methods above are what the tools implement,
-  not what any one of them calls.
+- No command lines and no solver options. The methods above are what the tools implement, not what any
+  one of them calls; `toolchain.md` carries the entry points and the licence terms.
 - No claim that any of this is automatic. Every boundary, every stub and every validation in this file is a
   decision made by the person running the work, and the failure modes exist because those decisions were
   left unmade.
 - No sizes or limits. "Too many paths" and "too many stubs" are properties of a question and a host, and
   every number quoted for them elsewhere is someone else's question.
+- **No ranking of the tools by speed.** No project in this space publishes a quantified bit-vector
+  performance claim, so a ranking would be invented. The differences that are documented are about
+  coverage and defaults, not throughput.
+
+## The tools, and the defaults that decide your answer
+
+Named here because a reader cannot install a method, and because three of the four surprises below are
+silent: the run finishes and the result is narrower than the question. `observed` from the projects' own
+documentation and source; the repository's research record holds the URLs.
+
+| Tool | What it is for | The default that bites |
+|---|---|---|
+| **Z3** (MIT, `z3-solver`) | The solver every other tool here calls, and usable alone: a condition becomes a witness, or a small equivalent expression | Mixing bit-vectors with integers or reals carries significant overhead; model the whole problem in one domain. It can also return `unknown`, which is not a failure of your query but is also not an answer |
+| **Triton** (Apache-2.0, distribution name `triton-library`) | Tainting a trace and slicing it into an expression: the devirtualisation route | `MODE.MEMORY_ARRAY` is **off** by default, so symbolic pointers are not modelled unless asked for; `MODE.SYMBOLIZE_LOAD`/`STORE` are off, so indices get concretised; only path constraints containing symbolic variables are tracked. A run without these set is exploring a different problem than the one you described |
+| **angr** (BSD-2-Clause) | Exploring paths to a target condition rather than executing one | A **symbolic write index is concretised** to a single value, and so is an over-wide read index. The project's own documentation is candid that symbolic lengths are handled poorly. This is a hard limit on code that indexes arrays with derived values |
+| **Unicorn** (GPLv2 — the package metadata says BSD and the repository says GPLv2; treat it as GPLv2) | Emulating a bounded range with no OS | It is a pure CPU model: on x86 only five instructions can be hooked, and a system call has no meaning. Translated-block caching also means a modified code range needs the cache invalidated before the change takes effect |
+| **Qiling** (GPLv2) | Emulation with an OS layer, when a system call is in the way | The environment is stubbed by the framework, so a call it does not model is still a choice about the answer |
+| **Miasm** (GPLv2) | IR, JIT and symbolic execution in one native-Python package | PyPI trails the source by years, so the installed version may not match the documentation you are reading |
+
+**Two traps that are about packaging rather than algorithms.** A release tag is not a maintenance signal:
+one project's newest tagged release is years older than its active development branch, so an abandoned
+verdict from a releases page is a reading of the wrong field. And several of these are published on PyPI
+under a version years behind their repository, so `pip install` can give you behaviour the upstream
+documentation does not describe. Record the installed version beside any result.
+
+**A solver near-miss that deserves naming:** a tool that only supports one operating system's binaries is
+not a general route, however good it is, and a project whose own README says its first release is not
+finished is a research dependency rather than a pip install.
