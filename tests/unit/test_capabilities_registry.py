@@ -281,7 +281,7 @@ def test_closure_follows_more_than_one_hop_and_deduplicates_a_diamond(load_scrip
                        ("synthetic_right", ["synthetic_bottom"]),
                        ("synthetic_bottom", [])):
         monkeypatch.setitem(caps.CAPABILITIES, name,
-                            {"name": name, "required": ["python39"], "depends_on": deps})
+                            {"name": name, "required": ["python310"], "depends_on": deps})
     assert caps.closure("synthetic_top") == ["synthetic_top", "synthetic_left",
                                              "synthetic_right", "synthetic_bottom"]
 
@@ -294,7 +294,7 @@ def test_closure_of_an_id_that_is_not_a_capability_is_the_id_alone(load_script):
 # --- resolve -----------------------------------------------------------------
 
 def synthetic_capability(monkeypatch, caps, capability_id, **spec):
-    body = {"name": "Synthetic " + capability_id, "required": ["python39"]}
+    body = {"name": "Synthetic " + capability_id, "required": ["python310"]}
     body.update(spec)
     monkeypatch.setitem(caps.CAPABILITIES, capability_id, body)
 
@@ -302,7 +302,7 @@ def synthetic_capability(monkeypatch, caps, capability_id, **spec):
 def test_resolve_reports_blocked_and_names_the_missing_atom(load_script, monkeypatch):
     caps = load_script("capabilities.py")
     synthetic_capability(monkeypatch, caps, "synthetic_missing",
-                         required=["python39", "artifact:sample"])
+                         required=["python310", "artifact:sample"])
     result = caps.resolve("synthetic_missing", probe(caps))
     assert result["state"] == "blocked"
     assert [atom for atom, _detail in result["missing"]] == ["artifact:sample"]

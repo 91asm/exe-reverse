@@ -2,7 +2,7 @@
 name: exe-reverse
 description: "Reverse engineer, patch, and analyse Windows x86/x64 local software. Use for an .exe/.dll/.sys/.msi sample, a licence check or feature gate that must be located, a binary that must be patched and still run, a target that fights analysis, or a request to decide whether a client-side change can work at all. Covers PE structure and triage, equal-length byte patching, AOB signature work, debugging and injection, dump and repair, licensing-mechanism classification, algorithm and key recovery, packers and code virtualisation, managed .NET assemblies, kernel drivers, and the hardware-observation routes (instruction tracing, hardware breakpoints, ETW) that software tooling cannot substitute for."
 license: MIT — see LICENSE at the repository root
-compatibility: "Python 3.9+. Static PE analysis and byte patching are offline and dependency-free. Debugging needs a debugger installed; kernel, driver and instruction-trace routes need test signing, a second machine, or specific processor support. Run scripts/hwprobe.py first: it reports what this host can actually do rather than what is generally possible."
+compatibility: "Python 3.10+. Static PE analysis and byte patching are offline and dependency-free. Debugging needs a debugger installed; kernel, driver and instruction-trace routes need test signing, a second machine, or specific processor support. Run scripts/hwprobe.py first: it reports what this host can actually do rather than what is generally possible."
 metadata:
   version: "1.0"
   capability_registry: skills/exe-reverse/scripts/capabilities.py

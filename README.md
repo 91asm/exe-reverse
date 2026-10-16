@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-49454F?style=flat-square" alt="license"></a>
-  <img src="https://img.shields.io/badge/python-3.9%2B-49454F?style=flat-square&logo=python&logoColor=white" alt="python">
+  <img src="https://img.shields.io/badge/python-3.10%2B-49454F?style=flat-square&logo=python&logoColor=white" alt="python">
   <img src="https://img.shields.io/badge/platform-windows-49454F?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/strength_labels-observed%20%7C%20inferred%20%7C%20unverified-49454F?style=flat-square" alt="strength labels">
 </p>
@@ -106,7 +106,7 @@ skills/exe-reverse/SKILL.md     a procedure with gates, not background reading:
                                 the workflow -> what "done" means -> stop conditions -> constraints
 skills/exe-reverse/references/  loaded on demand, one topic each; the inventory with when to load
                                 each one is skills/exe-reverse/references/routing.md
-skills/exe-reverse/scripts/     parameterised and path-agnostic; runnable on a bare Python 3.9+
+skills/exe-reverse/scripts/     parameterised and path-agnostic; runnable on a bare Python 3.10+
 skills/exe-reverse/evals/       the with-skill / without-skill cases, and how to run them
 skills/exe-reverse/evidence/    the machine-readable companions to the evidence summary
 docs/tool-verification/         the evidence record for measurement passes (not shipped)
@@ -153,7 +153,7 @@ export EXEREV_TOOLS=<dir>:<dir>                  # POSIX
 
 | Tool | Used for |
 |---|---|
-| Python 3.9+ | every script; the PE reader, patcher, host probe, capability registry and doctor are dependency-free |
+| Python 3.10+ | every script; the PE reader, patcher, host probe, capability registry and doctor are dependency-free |
 | A disassembler/decompiler (IDA, Ghidra, Binary Ninja, Cutter) | reading code; several are GUI-only, and a GUI-only tool is a request for a human, not a reason to substitute a weaker one |
 | A debugger (x64dbg, WinDbg) | locating runtime behaviour and watching values |
 | `dumpbin` / `link` (MSVC toolchain) | header and import inspection when you have the SDK |

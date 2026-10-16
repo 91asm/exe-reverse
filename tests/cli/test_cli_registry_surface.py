@@ -82,7 +82,7 @@ def test_one_capability_reports_its_closure_and_its_state(run_script):
     assert result.returncode == 0, result.stderr
     assert "capability: Read a PE image's structure" in result.stdout
     assert "scripts   : peutil.py" in result.stdout
-    assert "requires  : python39, file:peutil.py" in result.stdout
+    assert "requires  : python310, file:peutil.py" in result.stdout
     assert "state     : ok" in result.stdout
     assert result.stdout.strip().endswith("RESULT=capabilities_ok")
 

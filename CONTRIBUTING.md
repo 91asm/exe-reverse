@@ -34,12 +34,12 @@ parts a script can see, and says nothing about the rest.
 ## Local setup
 
 The interpreter is the only requirement to run anything here, at the minimum version the skill
-declares (3.9 or newer). The skill's scripts import nothing outside the standard library; everything
+declares (3.10 or newer). The skill's scripts import nothing outside the standard library; everything
 else is optional and each consumer states what it uses.
 
 | Dependency | Needed for | Notes |
 |---|---|---|
-| The interpreter, 3.9 or newer | every script and every gate | `skills/exe-reverse/SKILL.md` declares the floor as 3.9+; `mypy.ini` type-checks against 3.9 |
+| The interpreter, 3.10 or newer | every script and every gate | `skills/exe-reverse/SKILL.md` declares the floor as 3.10+, and `mypy.ini` type-checks against the same 3.10 so the documented floor and the checked floor cannot drift apart |
 | `pytest` | the regression suite (`tests/`, declared in `pytest.ini`) | markers `unit`, `cli`, `integration` are declared, and `--strict-markers` is on |
 | `PyYAML` | parsing `SKILL.md` frontmatter the way the installer's YAML parser will | `check_repo.py` falls back to a colon test and prints a `WARN` when it is absent |
 | `tiktoken` | measuring the always-loaded body against the real tokenizer | without it `check_budget.py` uses a calibrated `characters / 4.285` fallback; CI installs it |
@@ -222,7 +222,7 @@ Length follows content; 100 to 300 lines is typical, and loadable is better than
    paths carrying a `<placeholder>` are exempt; a real workbench path is a finding, and the fix is in
    the file rather than in the exemption list.
 7. Everything targets the interpreter at the declared minimum version: no third-party import outside
-   a `try`/`except` with a stated fallback, since `mypy` is configured against 3.9 and the gates run
+   a `try`/`except` with a stated fallback, since `mypy` is configured against 3.10 and the gates run
    on a bare interpreter.
 
 **Recipe:**

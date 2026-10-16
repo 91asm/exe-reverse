@@ -95,8 +95,8 @@ TOKENS = {
 #   unverified -- nobody here has timed it; the number is a planning aid only
 ATOMS = {
     # --- the interpreter ------------------------------------------------------
-    'python39': {
-        'name': 'Python 3.9+',
+    'python310': {
+        'name': 'Python 3.10+',
         'kind': 'python',
         'est_minutes': 0,
         'basis': 'observed',
@@ -688,14 +688,14 @@ ATOMS = {
 CAPABILITIES = {
     'pe_structure_read': {
         'name': 'Read a PE image\'s structure',
-        'required': ['python39', 'file:peutil.py'],
+        'required': ['python310', 'file:peutil.py'],
         'scripts': ['peutil.py'],
         'note': 'Headers, sections, directories, imports, exports, resources, TLS, relocations '
                 'and the checksum, offline and dependency-free.',
     },
     'pe_triage': {
         'name': 'Triage an unknown image into signals',
-        'required': ['python39', 'file:pe_triage.py'],
+        'required': ['python310', 'file:pe_triage.py'],
         'depends_on': ['pe_structure_read'],
         'scripts': ['pe_triage.py'],
         'note': 'Identity, build evidence, protective signals with their measurements, and a '
@@ -703,7 +703,7 @@ CAPABILITIES = {
     },
     'equal_length_patch': {
         'name': 'Apply a verified equal-length byte patch',
-        'required': ['python39', 'file:pepatch.py'],
+        'required': ['python310', 'file:pepatch.py'],
         'depends_on': ['pe_structure_read'],
         'scripts': ['pepatch.py'],
         'note': 'Read-only input, a new output file, an ambiguity guard, checksum recomputation, '
@@ -711,7 +711,7 @@ CAPABILITIES = {
     },
     'aob_locate': {
         'name': 'Locate a byte pattern and judge the pattern',
-        'required': ['python39', 'file:aob_scan.py'],
+        'required': ['python310', 'file:aob_scan.py'],
         'depends_on': ['pe_structure_read'],
         'scripts': ['aob_scan.py'],
         'note': 'Reports the hit count and a verdict, so a pattern that is a coin flip is '
@@ -719,7 +719,7 @@ CAPABILITIES = {
     },
     'build_compare': {
         'name': 'Compare two builds of the same program',
-        'required': ['python39', 'file:pe_diff.py', 'artifact:two_builds'],
+        'required': ['python310', 'file:pe_diff.py', 'artifact:two_builds'],
         'depends_on': ['pe_structure_read'],
         'scripts': ['pe_diff.py'],
         'note': 'Content-hash comparison with the volatile header fields normalised, so a '
@@ -727,21 +727,21 @@ CAPABILITIES = {
     },
     'fixture_generation': {
         'name': 'Build a synthetic PE fixture offline',
-        'required': ['python39', 'file:make_fixture_pe.py'],
+        'required': ['python310', 'file:make_fixture_pe.py'],
         'scripts': ['make_fixture_pe.py'],
         'note': 'Deterministic, byte-reproducible images carrying the awkward cases on purpose. '
                 'No third-party sample is needed to exercise any parser here.',
     },
     'identity_scan': {
         'name': 'Scan a tree for target identity before publishing',
-        'required': ['python39', 'file:scan_leaks.py'],
+        'required': ['python310', 'file:scan_leaks.py'],
         'scripts': ['scan_leaks.py'],
         'note': 'Rules with their exemptions, findings with their context, and an exit code that '
                 'can gate a commit.',
     },
     'host_capability_probe': {
         'name': 'Report what this host can actually support',
-        'required': ['python39', 'file:hwprobe.py'],
+        'required': ['python310', 'file:hwprobe.py'],
         'scripts': ['hwprobe.py'],
         'note': 'Processor features read from the processor, OS and policy facts, the tool '
                 'inventory, and a per-route verdict in three states.',
@@ -750,7 +750,7 @@ CAPABILITIES = {
     # --- static analysis beyond what this kit ships ---------------------------
     'static_disassembly': {
         'name': 'Disassemble or decompile with a full engine',
-        'required': ['python39'],
+        'required': ['python310'],
         'any_of': ['tool:ghidra', 'tool:ida', 'tool:binaryninja', 'tool:radare2', 'tool:rizin',
                    'tool:objdump'],
         'note': 'One of these is enough. The GUI-only ones are for a human; the ones with a '
@@ -758,7 +758,7 @@ CAPABILITIES = {
     },
     'managed_inspect': {
         'name': 'Inspect or change a managed assembly',
-        'required': ['python39'],
+        'required': ['python310'],
         'any_of': ['tool:ildasm', 'tool:ilasm', 'tool:dotnet'],
         'note': 'A managed assembly is a different artifact: the logic is CIL and metadata, and '
                 'editing bytes without updating the tables produces something that loads and '
@@ -766,7 +766,7 @@ CAPABILITIES = {
     },
     'installer_inspect': {
         'name': 'Get at an installer\'s payload without running it',
-        'required': ['python39'],
+        'required': ['python310'],
         'any_of': ['tool:innoextract', 'tool:7z', 'tool:strings', 'tool:radare2'],
         'note': 'The container type decides the route, and the interesting binary may not exist on '
                 'disk until a particular step of the install runs. Extract first, then re-triage '
@@ -774,7 +774,7 @@ CAPABILITIES = {
     },
     'flutter_static': {
         'name': 'Read a Flutter application\'s compiled Dart',
-        'required': ['python39', 'file:dart_snapshot_strings.py'],
+        'required': ['python310', 'file:dart_snapshot_strings.py'],
         'note': 'Literals are recoverable from the snapshot with nothing installed, which is '
                 'usually enough to name the feature and the tier vocabulary. Locating the code that '
                 'uses a literal needs the object pool parsed, and that needs version-matched '
@@ -880,7 +880,7 @@ CAPABILITIES = {
     },
     'licence_classification': {
         'name': 'Classify a licence mechanism before touching it',
-        'required': ['python39'],
+        'required': ['python310'],
         'note': 'No tool is needed for the classification itself, which is why it is a capability '
                 'of the written material rather than of an install.',
     },
@@ -1036,7 +1036,7 @@ class Probe(object):
 
         if kind == 'python':
             v = sys.version_info
-            result = {'ok': v >= (3, 9), 'detail': 'python %d.%d.%d' % v[:3]}
+            result = {'ok': v >= (3, 10), 'detail': 'python %d.%d.%d' % v[:3]}
         elif kind == 'module':
             ok = self.have_module(spec['module'])
             result = {'ok': ok, 'detail': spec['module'] + (' importable' if ok

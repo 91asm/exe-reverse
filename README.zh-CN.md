@@ -66,7 +66,7 @@ skills/exe-reverse/SKILL.md     带门禁的流程，不是背景阅读：
                                 工作流 -> "完成"的定义 -> 停止条件 -> 不可协商约束
 skills/exe-reverse/references/  按需加载，一文一题；"何时加载"的清单位于
                                 skills/exe-reverse/references/routing.md
-skills/exe-reverse/scripts/     参数化、与路径无关；在裸 Python 3.9+ 上即可运行
+skills/exe-reverse/scripts/     参数化、与路径无关；在裸 Python 3.10+ 上即可运行
 skills/exe-reverse/evals/       有 skill / 无 skill 的对照用例，以及运行方法
 skills/exe-reverse/evidence/    证据摘要的机器可读配套文件
 docs/tool-verification/         测量通行的证据记录（不随 skill 分发）
@@ -110,7 +110,7 @@ export EXEREV_TOOLS=<dir>:<dir>                  # POSIX
 
 | 工具 | 用途 |
 |---|---|
-| Python 3.9+ | 全部脚本；PE 读取器、补丁器与探测脚本无第三方依赖 |
+| Python 3.10+ | 全部脚本；PE 读取器、补丁器与探测脚本无第三方依赖 |
 | 反汇编器/反编译器（IDA、Ghidra、Binary Ninja、Cutter） | 读代码；其中若干只有 GUI，而只有 GUI 的工具是"向人要"而不是"用更弱的方法顶替"的理由 |
 | 调试器（x64dbg、WinDbg） | 定位运行时行为、观察取值 |
 | `dumpbin` / `link`（MSVC 工具链） | 有 SDK 时的头与导入表检查 |

@@ -46,7 +46,8 @@ import sys
 try:
     import winreg
 except ImportError:      # non-Windows host: the OS rows degrade, CPUID still works
-    winreg = None
+    # A typing gap, not a runtime one: every use below tests for None before touching it.
+    winreg = None        # type: ignore[assignment]
 
 # --- CPUID stub ---------------------------------------------------------------
 # uint32_t probe(uint32_t leaf /*rcx*/, uint32_t sub /*rdx*/, uint32_t out[4] /*r8*/)
