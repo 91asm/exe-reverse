@@ -119,6 +119,7 @@ explicit paths for anything it shells out to. `--help` on each one is the author
 | `scripts/preflight.py` | run this before one session starts: the sample hashed and a working copy in place, the destination writable and large enough for the route (and, when it is not, which volume is), the route's prerequisites held, and no leftover tracing session or proxy to make the run incomparable. `--space` lists the volumes; `--cleanup` reclaims session directories this script created, and refuses any directory that does not carry its own manifest |
 | `scripts/capabilities.py` | the capability registry: atoms and their closures, what each needs, an executable next step for anything missing, and a cost estimate labelled with the strength of the measurement behind it |
 | `scripts/dart_snapshot_strings.py` | recover string literals from a Dart AOT snapshot (the `app.so` of a Flutter application) and report the reference mechanism, which decides whether instruction scanning can find a literal's users at all |
+| `scripts/fold.py` | the bounded-summary rule made executable: one pass over a large record, a shape decided by a depth scan of its own bytes (a pretty-printed document and a line-delimited one both begin with `{`, and a size cutoff once streamed one as the other), every list capped at `--limit` and every cap admitted, `--grep` for the lines that matter, `--key` for one field's distribution, and the record itself left untouched -- because re-running a producer to shrink its answer costs the same and returns less |
 
 ## Sub-indexes
 

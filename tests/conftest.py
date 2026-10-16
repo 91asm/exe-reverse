@@ -31,10 +31,12 @@ SCRIPTS_DIR = REPO_ROOT / "skills" / "exe-reverse" / "scripts"
 # The scripts declare "Python 3.9+" in their own docstrings.
 MIN_PYTHON = (3, 9)
 
-# Every script this suite may load by name or run as a subprocess. The last three were added with
+# Every script this suite may load by name or run as a subprocess. The last four were added with
 # their own layers of the suite: the capability registry and the environment doctor answer questions
-# about this host, and the Dart snapshot reader takes an ELF rather than a PE, so its input is
-# generated here by `build_synthetic_elf` instead of by `make_fixture_pe.py`.
+# about this host, the Dart snapshot reader takes an ELF rather than a PE (so its input is generated
+# here by `build_synthetic_elf` instead of by `make_fixture_pe.py`), and the folder summarises
+# records too large to read, so its tests assert on the bounds of its output rather than on file
+# fixtures of any particular size.
 SCRIPT_FILES = (
     "peutil.py",
     "pepatch.py",
@@ -45,6 +47,7 @@ SCRIPT_FILES = (
     "capabilities.py",
     "doctor.py",
     "dart_snapshot_strings.py",
+    "fold.py",
 )
 
 # A hang detector, not a performance assertion. Nothing in this suite is meant to be slow.

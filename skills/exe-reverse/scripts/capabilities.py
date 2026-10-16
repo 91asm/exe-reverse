@@ -574,6 +574,8 @@ ATOMS = {
                                 'est_minutes': 0, 'basis': 'observed'},
     'file:scan_leaks.py': {'name': 'scripts/scan_leaks.py (identity scanner)', 'kind': 'file',
                            'script': 'scan_leaks.py', 'est_minutes': 0, 'basis': 'observed'},
+    'file:fold.py': {'name': 'scripts/fold.py (record folder)', 'kind': 'file',
+                     'script': 'fold.py', 'est_minutes': 0, 'basis': 'observed'},
     'file:doctor.py': {'name': 'scripts/doctor.py (environment doctor)', 'kind': 'file',
                        'script': 'doctor.py', 'est_minutes': 0, 'basis': 'observed'},
     'file:dart_snapshot_strings.py': {'name': 'scripts/dart_snapshot_strings.py (Dart snapshot '
@@ -745,6 +747,14 @@ CAPABILITIES = {
         'scripts': ['hwprobe.py'],
         'note': 'Processor features read from the processor, OS and policy facts, the tool '
                 'inventory, and a per-route verdict in three states.',
+    },
+    'record_folding': {
+        'name': 'Fold a large record into a bounded summary',
+        'required': ['python310', 'file:fold.py'],
+        'scripts': ['fold.py'],
+        'note': 'The mechanism behind the bounded-summary rule: one pass, a shape decided from '
+                'the bytes rather than the name, every list capped and every cap admitted, and '
+                'the record itself left untouched for the question that needs all of it.',
     },
 
     # --- static analysis beyond what this kit ships ---------------------------
@@ -1155,6 +1165,7 @@ SCRIPT_CAPABILITIES = {
     'hwprobe.py': ['host_capability_probe'],
     'make_fixture_pe.py': ['fixture_generation'],
     'scan_leaks.py': ['identity_scan'],
+    'fold.py': ['record_folding'],
     'capabilities.py': ['host_capability_probe'],
     'doctor.py': ['host_capability_probe'],
     # Not a Python script, but it belongs to a capability all the same: it instruments a live

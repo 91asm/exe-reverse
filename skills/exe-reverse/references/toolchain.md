@@ -492,6 +492,11 @@ can consume, followed by a re-run to "get a smaller answer".
   bounded summary and writes the complete record to a path it reports. Read the summary; open the file only for
   the specific question the summary left open. For a tool you did not write, the same discipline applies by
   redirection: keep the full output in a file, and read a bounded head, a count and an error summary from it.
+  `scripts/fold.py` is this rule executable: one pass, a shape decided by a depth scan of the file's own bytes,
+  every list capped and every cap admitted, and the record left untouched. On this host it folded a 104 MB
+  evidence record (445,463 lines) into a one-screen summary in 2.7 s -- and its first version is also the
+  cautionary tale: a shape guessed from the first byte and the size streamed a 32 MB single document as
+  line-delimited and reported sixteen thousand records that did not exist. The shape is decided by the bytes.
 - **Fold a listing before it reaches anything with a context limit.** A raw disassembly listing or a trace is
   reduced to basic blocks, a call sequence and a histogram **before** it is reported or passed onward: the folded
   form answers "where did this diverge", the raw form answers nothing a reader can hold. This applies with special
