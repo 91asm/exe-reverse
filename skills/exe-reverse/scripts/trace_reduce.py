@@ -60,7 +60,7 @@ Usage
     python trace_reduce.py --file expr.txt
     python trace_reduce.py --list-rules
     python trace_reduce.py "(x & 0xff) ^ (x & 0xff)"
-    python trace_reduce.py "(x ^ y) + 2 * (x & y)" --prove C:\path\to\solver.exe
+    python trace_reduce.py "(x ^ y) + 2 * (x & y)" --prove /path/to/solver
 
 Exit codes: 0 = reduced and every sample agrees (and, with `--prove`, proven equivalent), 1 = a
 sample or a solver's witness disagreed, 2 = usage error, 3 = the expression could not be parsed.
