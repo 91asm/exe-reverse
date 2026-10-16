@@ -294,6 +294,39 @@ a plan on it. The cost is one command; the failure mode otherwise is a tool that
 returns nothing, which reads as "there is nothing there" rather than "this reader does not fit this
 file".
 
+## Reaching the code at run time, which needs a different address convention
+
+A static address is not a runtime address, and on this platform the difference is larger than an
+image base. Three lookup strategies failed before the mapping was understood (`observed`):
+
+| Attempt | Result | Why |
+|---|---|---|
+| module lookup by name | not found | the snapshot is not loaded as a named module |
+| ELF-header scan over executable ranges | no hit | the code section is mapped **without** its file header |
+| byte-signature scan at the wrong base convention | no hit | the address arithmetic assumed the base meant the file's first byte |
+
+What the runtime actually does is map the **code section alone** into executable memory. Measured:
+a region of size `0xFF3000` whose first bytes are `00 66 00 00`, matching the section's own opening
+bytes and its size rounded to a page. Two consequences follow, and both are needed to place anything:
+
+- **recognise the region by its content**, not by a header it does not have: the size is close to the
+  section size and the opening bytes match the file's;
+- **translate with the section's own virtual address**, not zero: a function at file vaddr `V` lives
+  at `mappedBase + (V − sectionVaddr)`. Using `mappedBase + V` puts the address inside the mapping
+  but not at the function, which is the failure that produced a legal-looking but unhookable address.
+
+**And the check that makes any of it worth doing:** read the bytes at the site the edit touched, in
+memory, and compare them with what was written to disk. That answers "did the edited file actually
+get loaded" before anything about behaviour is observed, and it is cheap. `observed`: the region was
+found, the site read back as six no-ops, and the loaded build was identified as the edited one -- so
+the runtime observation that follows is about the change rather than about a stale copy.
+
+**A negative from the same run, stated as a negative.** With the probe attached, the judge was not
+reached during startup or forty seconds of idle, which is the expected result rather than a failed
+one: a gate is evaluated when the gated action is attempted, not when the program opens. The probe
+distinguishes that state explicitly, because "nothing was attempted" and "the gate cleared" are both
+silent and only one of them means anything.
+
 ## What cannot be done from the file alone
 
 - **No symbol recovery.** There is nothing to recover: the image is stripped by design, not by an
