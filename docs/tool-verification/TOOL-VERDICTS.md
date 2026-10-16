@@ -53,6 +53,7 @@ Three columns: what the skill says, how strongly it is supported, and what would
 | Installer and package formats | `inferred` from each project's own documentation | extraction performed on a sample of each container type |
 | Debugger breakpoint families and their costs | `inferred` from the debugger's own documentation | a debugger installed, and a session recorded |
 | Injection and hooking mechanics | `inferred` from the platform API documentation | a run, on a sample, with a control |
+| Runtime gate verdict by paired observation | `observed` end to end on a real gated feature of a patched snapshot target: the code section was located by content match, the six patched bytes were read back live from the mapped code before any verdict was trusted, the shared decision function was entered exactly once, returned the true-object pointer, and the refusal display routine was never entered | a second target whose gate shape differs, to exercise the other two verdict states against reality |
 | Dump semantics and repair | `inferred` from the platform's dump documentation | a dump repaired and loaded |
 | Hardware breakpoints | `inferred` from the architecture as documented; the **count** of debug registers is the only architectural fact stated | a debugger, and a session on a host whose probe reports the route available |
 | Instruction tracing capability and decoding | `unverified` here: the CPU reports the feature and no capture was taken | a capture path, then a decoder, then an address-to-symbol pass |
