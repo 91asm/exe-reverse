@@ -467,6 +467,12 @@ carries its reason next to it:
 8. **Sandbox install directories** created while testing the `skills` CLI against the repository.
 9. **Screenshots.** An image is evidence while a task runs and never part of the tree; the text of
    what it showed belongs in the record instead.
+10. **Anything a concurrent writer left behind.** `git add -A` stages whatever exists at that
+    moment, including a helper script another pass created and never intended to ship. That is not
+    hypothetical: a markdown re-wrapping script reached this repository's history exactly that way,
+    harmless but unintended, and it had to be removed in a later commit. When more than one writer
+    is active, stage by path, and read `git diff --cached --name-only` before committing. The check
+    costs one command; the alternative is a file in the history that nobody chose.
 
 Two things the ignore rules cannot do, and which the gates do instead: a text file can name a target
 without containing a binary, which is what the leak scan is for; and an absolute path or a
