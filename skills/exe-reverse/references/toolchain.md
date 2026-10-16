@@ -15,8 +15,7 @@ and "a documented command does not run, or a tool is missing" here.
 
 ## How the labels in this file are used
 
-Every factual claim carries `observed`, `inferred` or `unverified`, and the two kinds of `observed` are kept
-apart
+Every factual claim carries `observed`, `inferred` or `unverified`, and the two kinds of `observed` are kept apart
 because they transfer differently (`observed (record)`: this repository's contribution rules).
 
 | Label | What it means | What it transfers to |
@@ -35,10 +34,8 @@ The `observed (source)` rows about products, interfaces, licences and maintenanc
 Read it when you need to argue with a claim here, or when a claim has aged: licences change, repositories are
 archived, and a project moves its active branch without moving its release tag.
 
-**Provenance of the tool sections.** Every tool claim in the static-analysis-engine, radare2/rizin/Cutter and
-MCP
-sections comes from the repository's research record `_research/F-agent-tooling.md`, unless the line says
-`observed
+**Provenance of the tool sections.** Every tool claim in the static-analysis-engine, radare2/rizin/Cutter and MCP
+sections comes from the repository's research record `_research/F-agent-tooling.md`, unless the line says `observed
 (host)` because it was re-measured here; the solver rows come the same way from `_research/F-solvers.md`. Both
 records name the URL behind every claim and carry their own strength label, negative results included.
 
@@ -47,18 +44,19 @@ records name the URL behind every claim and carry their own strength label, nega
 **A tool counts as installed when it runs and produces output — not when a file with its name exists on
 `PATH`.** Three consequences, each of which has cost a session:
 
-1. **A tool installed off `PATH` is not missing.** Installers place binaries in versioned directories, under a
-   user profile, or inside an SDK tree, and nothing adds them to `PATH`, so a probe that only consults `PATH`
-   reports a capable machine as bare. The host probe here resolves each name against `PATH` first, then against
-   directories given through its own repeatable option and through an environment variable, and labels a hit
-   found that way (`observed (host)`, `scripts/hwprobe.py`: `--tools-dir`, `EXEREV_TOOLS` /
-   `EXE_REVERSE_TOOLS`). 2. **A runnable archive counts as installed.** A `.py` invoked through the interpreter,
-   or a `.jar` invoked through the host's Java runtime or a vendor launcher, is a capability that exists. Give
-   it an input and see that it produces output; only then is it absent. 3. **A capability you never probed for
-   is not a capability you lack.** The probe answers with three states rather than two — available,
-   needs-something-named, unavailable with the reason (`observed (host)`, its route rows: `available`,
-   `needs-a-debugger`, `needs-privilege`, `needs-reboot-and-testsigning`, `no documented user-mode path on this
-   platform`). "Needs a restart and test signing" and "the CPU does not report this" lead to different plans.
+1. **A tool installed off `PATH` is not missing.** Installers place binaries in versioned directories, under a user
+   profile, or inside an SDK tree, and nothing adds them to `PATH`, so a probe that only consults `PATH` reports a
+   capable machine as bare. The host probe here resolves each name against `PATH` first, then against directories
+   given through its own repeatable option and through an environment variable, and labels a hit found that way
+   (`observed (host)`, `scripts/hwprobe.py`: `--tools-dir`, `EXEREV_TOOLS` / `EXE_REVERSE_TOOLS`).
+2. **A runnable archive counts as installed.** A `.py` invoked through the interpreter, or a `.jar` invoked through
+   the host's Java runtime or a vendor launcher, is a capability that exists. Give it an input and see that it
+   produces output; only then is it absent.
+3. **A capability you never probed for is not a capability you lack.** The probe answers with three states rather
+   than two — available, needs-something-named, unavailable with the reason (`observed (host)`, its route rows:
+   `available`, `needs-a-debugger`, `needs-privilege`, `needs-reboot-and-testsigning`, `no documented user-mode
+   path on this platform`). "Needs a restart and test signing" and "the CPU does not report this" lead to
+   different plans.
 
 Two invocations, run in this order before any plan depends on a tool:
 
@@ -75,19 +73,12 @@ host is the standing example: Python, MinGW binutils, `go`, `dotnet`, `frida`, `
 
 ## Tiers: what must be added before anything can run
 
-| Tier | Cost | Products in it | What it buys |
-|---|---|---|---|
-| **0. Already on the machine** | nothing | The PE format as the platform implements it; the event-tracing pair `wpr` + `logman` and the parser `tracerpt`; the boot-configuration editor `bcdedit`; the .NET CLI `dotnet`; the in-box IPT driver `ipt.sys` | Everything offline: this skill's readers and patchers, ETW capture, managed-runtime enumeration, boot configuration. **No static-analysis engine is in this tier.** |
-| **1. One download, no licence** | a fetch and an unpack | Ghidra plus PyGhidra; radare2; rizin; Cutter; the pip-installable solver and emulation layer; Frida; HyperDbg (see tier 3 for what else it costs); the Microsoft pieces — the debugger package carrying `cdb` and `TTD.exe`, the SDK carrying the header dumper and the signing tool | A working disassembler, decompiler, debugger engine and automation channel for ordinary tasks. A plan should normally live here. |
-| **2. Needs a licence** | a purchase, or accepting a licence's scope | IDA Pro, `idalib`, and the separate IDA Pro Headless SKU; Binary Ninja Commercial / Ultimate / headless | The strongest decompiler output in the field, Binary Ninja's layered intermediate languages, and **the only route to unattended IDA or unattended Binary Ninja** |
-| **3. Needs hardware, privilege or a second machine** | a reconfiguration you may not be allowed to make | Intel Processor Trace capture; HyperDbg; kernel debugging; hardware breakpoints; TTD recording; ETW kernel providers | The observation routes that survive a target which detects or refuses software instrumentation. Each is conditional on the host, and the probe states the condition |
-
-| Tier | The measurement that decides it |
-|---|---|
-| 0 | `wpr`, `tracerpt` and `bcdedit` resolve from the system directory here (`observed (host)`); the repository records `wpr` 10.0.26100.4652 and `logman` 10.0.26100.8875, noting that capture needs elevation to be worth anything (`observed (record)`). `dotnet --list-runtimes` answers with **six runtimes at once** here, so a managed-code result must name the runtime that ran it (`observed (host)`) |
-| 1 | Nothing beyond the download, but "free disassembler" is not one option: radare2 and rizin carry different licences, and Cutter's command line means something else again |
-| 2 | IDA Free costs nothing and removes the scripting capability entirely; Binary Ninja Free costs nothing and excludes the headless API. The answer to a licence gate is to buy the licence or change engines, never to script the unscriptable tier |
-| 3 | `observed (host)`: the processor reports Intel Processor Trace, the record-and-replay debugger is not installed, a hypervisor is present, and reading last-branch-record or performance-monitoring registers needs privilege. "The CPU supports it" is never "you can capture it" |
+| Tier | Cost | Products in it | What it buys | The measurement that decides it |
+|---|---|---|---|---|
+| **0. Already on the machine** | nothing | The PE format as the platform implements it; the event-tracing pair `wpr` + `logman` and the parser `tracerpt`; the boot-configuration editor `bcdedit`; the .NET CLI `dotnet`; the in-box IPT driver `ipt.sys` | Everything offline: this skill's readers and patchers, ETW capture, managed-runtime enumeration, boot configuration. **No static-analysis engine is in this tier.** | `wpr`, `tracerpt` and `bcdedit` resolve from the system directory here (`observed (host)`); the repository records `wpr` 10.0.26100.4652 and `logman` 10.0.26100.8875, noting that capture needs elevation to be worth anything (`observed (record)`). `dotnet --list-runtimes` answers with **six runtimes at once** here, so a managed-code result must name the runtime that ran it (`observed (host)`) |
+| **1. One download, no licence** | a fetch and an unpack | Ghidra plus PyGhidra; radare2; rizin; Cutter; the pip-installable solver and emulation layer; Frida; HyperDbg (see tier 3 for what else it costs); the Microsoft pieces — the debugger package carrying `cdb` and `TTD.exe`, the SDK carrying the header dumper and the signing tool | A working disassembler, decompiler, debugger engine and automation channel for ordinary tasks. A plan should normally live here. | Nothing beyond the download, but "free disassembler" is not one option: radare2 and rizin carry different licences, and Cutter's command line means something else again |
+| **2. Needs a licence** | a purchase, or accepting a licence's scope | IDA Pro, `idalib`, and the separate IDA Pro Headless SKU; Binary Ninja Commercial / Ultimate / headless | The strongest decompiler output in the field, Binary Ninja's layered intermediate languages, and **the only route to unattended IDA or unattended Binary Ninja** | IDA Free costs nothing and removes the scripting capability entirely; Binary Ninja Free costs nothing and excludes the headless API. The answer to a licence gate is to buy the licence or change engines, never to script the unscriptable tier |
+| **3. Needs hardware, privilege or a second machine** | a reconfiguration you may not be allowed to make | Intel Processor Trace capture; HyperDbg; kernel debugging; hardware breakpoints; TTD recording; ETW kernel providers | The observation routes that survive a target which detects or refuses software instrumentation. Each is conditional on the host, and the probe states the condition | `observed (host)`: the processor reports Intel Processor Trace, the record-and-replay debugger is not installed, a hypervisor is present, and reading last-branch-record or performance-monitoring registers needs privilege. "The CPU supports it" is never "you can capture it" |
 
 ## The static-analysis engines, one by one
 
@@ -110,35 +101,35 @@ ida -B sample.exe
 - **`-A` is not "run a script".** Its documented meaning is autonomous mode: "IDA will not display dialog boxes.
   Designed to be used together with `-S` switch." It suppresses interaction and executes nothing by itself — the
   most commonly misquoted switch in the domain, which is why the repository records it as a fact worth stating
-  (`observed (record)`, `docs/tool-verification/TOOL-VERDICTS.md`). - **`-S###` runs a script**, when the
-  database is opened. The interpreter follows the extension (`.idc`, `.py`), parameters may follow the script
-  name, and they arrive in the IDC global `ARGV` (`ARGV.count` / `ARGV[0]`, and in Python after `import idc`,
-  `idc.ARGV`). - **`-B` is a wrapper, not a third mechanism**: `ida -B input-file` is documented as equivalent
-  to `ida -c -A -Sanalysis.idc input-file`, writing a database and an assembly listing beside the input. -
-  Switches for a repeatable run: `-a` disables automatic analysis (`-a-` enables it), `-c` creates a new
-  database and deletes an existing one, `-o####` names the output database and implies `-c`, `-L####` the log
-  file, `-T###` the file type or archive member (suppressing the load-file dialog), `-p####` the processor. -
-  **Two batch caveats.** Ordinary plugins are **not** loaded automatically in batch mode, because the analysis
+  (`observed (record)`, `docs/tool-verification/TOOL-VERDICTS.md`).
+- **`-S###` runs a script**, when the database is opened. The interpreter follows the extension (`.idc`, `.py`),
+  parameters may follow the script name, and they arrive in the IDC global `ARGV` (`ARGV.count` / `ARGV[0]`, and
+  in Python after `import idc`, `idc.ARGV`).
+- **`-B` is a wrapper, not a third mechanism**: `ida -B input-file` is documented as equivalent to
+  `ida -c -A -Sanalysis.idc input-file`, writing a database and an assembly listing beside the input.
+- Switches for a repeatable run: `-a` disables automatic analysis (`-a-` enables it), `-c` creates a new database
+  and deletes an existing one, `-o####` names the output database and implies `-c`, `-L####` the log file,
+  `-T###` the file type or archive member (suppressing the load-file dialog), `-p####` the processor.
+- **Two batch caveats.** Ordinary plugins are **not** loaded automatically in batch mode, because the analysis
   script exits before the kernel reaches the plugin-loading point; and the vendor's batch guidance recommends
   `idalib` instead, because it uses fewer system resources.
 
 **Headless entry point, route 2 — `idalib`**, "IDA as a library", usable from standalone applications so that
 analysis runs headlessly:
 
-- **`import idapro` must be the first import in the script**, before any other IDA module; IDAPython modules
-  such as `ida_funcs` and `ida_auto` come after it. Two API routes sit on top: IDAPython and the higher-level
-  Domain API. C++ links against `idalib.hpp` and the IDA C++ SDK. - The Python-side lifecycle function names are
-  **`unverified`**: the documentation read describes the sequence as "initialize, open a database, analyze,
-  close" without naming the functions. - **Registration is one-time and per-installation**: `idalib` finds the
-  installation through `ida.config.json`, and activation happens during installation (9.4 and later), through
-  HCLI, or by running the installation's `py-activate-idalib.py` helper in its `idalib/python/` directory. -
-  **One vCPU per process**: "IDA is single-threaded. Allocate one vCPU per container." Plan processes, not
-  threads.
+- **`import idapro` must be the first import in the script**, before any other IDA module; IDAPython modules such
+  as `ida_funcs` and `ida_auto` come after it. Two API routes sit on top: IDAPython and the higher-level Domain
+  API. C++ links against `idalib.hpp` and the IDA C++ SDK.
+- The Python-side lifecycle function names are **`unverified`**: the documentation read describes the sequence as
+  "initialize, open a database, analyze, close" without naming the functions.
+- **Registration is one-time and per-installation**: `idalib` finds the installation through `ida.config.json`,
+  and activation happens during installation (9.4 and later), through HCLI, or by running the installation's
+  `py-activate-idalib.py` helper in its `idalib/python/` directory.
+- **One vCPU per process**: "IDA is single-threaded. Allocate one vCPU per container." Plan processes, not threads.
 
 **The licence gate, and it is the hard part** (`observed (source)`): `idalib` is included in IDA Home, IDA Pro
 (Essential, Expert, Ultimate) and IDA Classroom. Embedding `idalib` in your own software, using it as a SaaS
-engine or running it on a shared server needs an **IDA Pro OEM** licence, free during development and beta
-phases.
+engine or running it on a shared server needs an **IDA Pro OEM** licence, free during development and beta phases.
 The separate **IDA Pro Headless** SKU is the same disassembler, decompiler and analysis delivered as a library
 with no interface, licensed per person, machine or seat.
 
@@ -146,9 +137,9 @@ with no interface, licensed per person, machine or seat.
 
 - **IDA Free has no scripting path at all** — no IDAPython, no C++ SDK, no `idalib` (`observed (source)`: the
   vendor's FAQ answers "No, you don't have access to IDA C++ SDK or IDAPython API with IDA Free."). It is
-  x86-32/x86-64 only, non-commercial only, and its decompiler is cloud-only. - **IDA Home, the paid personal
-  edition, does not restore `-S`**: "The `-S` switch is not available in the IDA Home edition", and `-O` is
-  unavailable there too (`observed (source)`). Free and Home are different products.
+  x86-32/x86-64 only, non-commercial only, and its decompiler is cloud-only.
+- **IDA Home, the paid personal edition, does not restore `-S`**: "The `-S` switch is not available in the IDA
+  Home edition", and `-O` is unavailable there too (`observed (source)`). Free and Home are different products.
 
 **Unattended?** Yes on IDA Pro, through either route, with route 2 the vendor's own recommendation. No on IDA
 Free or IDA Home. Neither route produces a conclusion: a batch job yields a database and a listing, not an
@@ -175,15 +166,16 @@ support/analyzeHeadless <project_location> <project_name> [options]
 | `-connect [<userID>]`, `-p`, `-commit ["<comment>"]`, `-okToDelete`, `-keystore` | Server projects and what gets committed |
 
 - **Output is captured as a log, not stdout.** This costs an hour when it is not known. The launcher's own
-  source states that it does not write script output directly to stdout or stderr and that the headless analyzer
-  uses only its logging mechanism to deliver output to the user; a script exception becomes a `REPORT SCRIPT
-  ERROR:` entry. A pipeline that greps standard output for script results gets nothing, and that emptiness is
-  not a finding about the target. - **`-noanalysis` and `-readOnly` are different decisions.** The first
-  controls whether automatic analysis runs after import; the second whether the project may be written back.
-  `-readOnly` is **required** inside a read-only project or repository, conflicts with `-commit` and
-  `-okToDelete` (the launcher's own error text refuses the combination), and processing a Ghidra URL enables
-  `-commit` automatically unless `-readOnly` is given. `-overwrite` does not apply in `-process` mode. -
-  **Concurrency is per-project**: a failure to obtain the project's write lock surfaces as an exception caused
+  source states that it does not write script output directly to stdout or stderr and that the headless
+  analyzer uses only its logging mechanism to deliver output to the user; a script exception becomes a
+  `REPORT SCRIPT ERROR:` entry. A pipeline that greps standard output for script results gets nothing, and that
+  emptiness is not a finding about the target.
+- **`-noanalysis` and `-readOnly` are different decisions.** The first controls whether automatic analysis runs
+  after import; the second whether the project may be written back. `-readOnly` is **required** inside a
+  read-only project or repository, conflicts with `-commit` and `-okToDelete` (the launcher's own error text
+  refuses the combination), and processing a Ghidra URL enables `-commit` automatically unless `-readOnly` is
+  given. `-overwrite` does not apply in `-process` mode.
+- **Concurrency is per-project**: a failure to obtain the project's write lock surfaces as an exception caused
   by a lock exception (`observed (source)`). Whether the documentation says "one process per project" in words
   is **`unverified`**; plan one process per project and do not add a lock protocol of your own.
 
@@ -222,24 +214,25 @@ with binaryninja.load("/path/to/sample.exe") as bv:
 
 The operational details that decide whether a run is usable, all `observed (source)`:
 
-- **Licence gate.** "As long as you have a Commercial or Ultimate license (or a headless license), it's possible
-  to invoke the core analysis library with all of its APIs without even launching the UI." The headless MCP
-  server is documented as **not** available in Free or Personal either, and the Free Edition licence forbids
+- **Licence gate.** "As long as you have a Commercial or Ultimate license (or a headless license), it's
+  possible to invoke the core analysis library with all of its APIs without even launching the UI." The headless
+  MCP server is documented as **not** available in Free or Personal either, and the Free Edition licence forbids
   reverse engineering Binary Ninja itself. `inferred`: the headless API is unavailable in Free and Personal,
-  since both statements restrict headless use to the paid tiers. - **Setup, teardown and parallelism.** The SDK
-  ships a helper (`install_api.py`) inside the product's own `scripts` directory that writes a `.pth` so Python
-  can find the library; the vendor warns against the store-distributed Python. `load()` with `with` closes the
-  view; without it, closing the file is the caller's job and memory leaks until the process ends.
-  Multiprocessing must use the `spawn` or `forkserver` start method, because forking "WILL CRASH OR HANG" in the
-  vendor's own wording. - **Two ways to make loading cheap or lazy.** `load(path, update_analysis=False)` skips
-  the linear sweep and the recursive descent. `load(path, options={'analysis.initialAnalysisHold': True})` holds
-  analysis, and reading a function's high-level IL then forces analysis on demand for that function only.
-  Registered plugin commands are reachable from the library: build a `PluginCommandContext(bv)` and execute a
-  named command from `PluginCommand.get_valid_list(cxt)`. - **Licence and user state are injectable, which makes
-  a clean container possible.** The licence normally sits in a file under the user profile and can also be set
-  through the API, which the vendor states does not obfuscate the serial number. User settings, user plugins and
-  repository plugins can each be disabled through environment variables that must be set **before** the library
-  is imported.
+  since both statements restrict headless use to the paid tiers.
+- **Setup, teardown and parallelism.** The SDK ships a helper (`install_api.py`) inside the product's own
+  `scripts` directory that writes a `.pth` so Python can find the library; the vendor warns against the
+  store-distributed Python. `load()` with `with` closes the view; without it, closing the file is the caller's
+  job and memory leaks until the process ends. Multiprocessing must use the `spawn` or `forkserver` start
+  method, because forking "WILL CRASH OR HANG" in the vendor's own wording.
+- **Two ways to make loading cheap or lazy.** `load(path, update_analysis=False)` skips the linear sweep and the
+  recursive descent. `load(path, options={'analysis.initialAnalysisHold': True})` holds analysis, and reading a
+  function's high-level IL then forces analysis on demand for that function only. Registered plugin commands
+  are reachable from the library: build a `PluginCommandContext(bv)` and execute a named command from
+  `PluginCommand.get_valid_list(cxt)`.
+- **Licence and user state are injectable, which makes a clean container possible.** The licence normally sits
+  in a file under the user profile and can also be set through the API, which the vendor states does not
+  obfuscate the serial number. User settings, user plugins and repository plugins can each be disabled through
+  environment variables that must be set **before** the library is imported.
 
 **The intermediate-language levels, and what each is for** (`observed (source)`, the vendor's IL overview):
 
@@ -250,10 +243,9 @@ The operational details that decide whether a run is usable, all `observed (sour
 | **MLIL** (Medium Level IL) | Registers and memory accesses become variables, types are associated with those variables, and platform information is used to generate calls. An SSA form exists | The level to query from a script: typed variables and real call structure without source-level guesswork |
 | **HLIL** (High Level IL) | The highest layer, meant for reading close to source | Reading by eye, and confirming in human terms what a script found at MLIL |
 
-**Read at HLIL, query at MLIL, drop to LLIL only when MLIL has absorbed the detail.** Two of the vendor's
-features that sound automated are not: the function-identification feature that generates GUIDs from function
-bytes is a signature-library mechanism, and the control that lets a human choose which basic blocks participate
-in analysis is a manual workflow.
+**Read at HLIL, query at MLIL, drop to LLIL only when MLIL has absorbed the detail.** Note that the vendor's
+function-identification feature, which generates GUIDs from function bytes, is a signature-library mechanism and
+not a model-driven one.
 
 **What it cannot do.** No batch switch exists to be found; the Free Edition forbids reverse engineering the
 product itself; and without a paid seat the route cannot run at all, however well the library is documented.
@@ -363,15 +355,16 @@ README overstates its own tool count**, in a table where another README understa
 
 **The pattern to apply before using any bridge**, which is the point of this section rather than the list:
 
-1. **Read the last commit date on the branch the instructions use.** Not the release page, not the banner. 2.
-   **Count the capability in the code, not in the README.** A tool count is cheap to check and has been wrong in
-   both directions above. 3. **Check whether the README defers to an official replacement** — that converts
-   "abandoned" into "handed over" — **and what it leaves unsaid.** A vendor bridge documents its constraints
-   (client count, secure mode, minimum build); a community bridge often documents nothing about its transport,
-   and a bearer token on a plaintext loopback port is a real exposure on a shared host. 4. **Keep the underlying
-   interface in the plan.** If the bridge breaks, the tool's own CLI or Python API is the fallback, and a plan
-   that only knows the bridge has none. Official-versus-community is also not good-versus-bad: two official
-   bridges are deliberately tiny, and one widely used community bridge is both larger and accurate.
+1. **Read the last commit date on the branch the instructions use.** Not the release page, not the banner.
+2. **Count the capability in the code, not in the README.** A tool count is cheap to check and has been wrong in
+   both directions above.
+3. **Check whether the README defers to an official replacement** — that converts "abandoned" into "handed over" —
+   **and what it leaves unsaid.** A vendor bridge documents its constraints (client count, secure mode, minimum
+   build); a community bridge often documents nothing about its transport, and a bearer token on a plaintext
+   loopback port is a real exposure on a shared host.
+4. **Keep the underlying interface in the plan.** If the bridge breaks, the tool's own CLI or Python API is the
+   fallback, and a plan that only knows the bridge has none. Official-versus-community is also not good-versus-bad:
+   two official bridges are deliberately tiny, and one widely used community bridge is both larger and accurate.
 
 The record-and-replay debugger has no MCP server of its own: its automation entry point is its own command line,
 and the MCP-side workflow for it rides the debugger's official bridge through a built-in prompt.
@@ -392,16 +385,13 @@ version 10.0.26100.1150, signature valid, with a service entry named for the fac
 and whose state here is stopped (`observed (host)`, re-measured for this file). Its contents tie it to two
 consumers — virtualisation support and crash-dump collection — and it creates a device object. **No device name,
 IOCTL contract or interface for a user-mode caller is documented anywhere that was searched** (`observed
-(source)`; the negative is bounded by that search). The driver is real, is Microsoft-signed, and is not
-reachable
+(source)`; the negative is bounded by that search). The driver is real, is Microsoft-signed, and is not reachable
 from a user-mode program through anything documented.
 
-**Decoding is the solved half.** The processor vendor publishes a reference decoder library with sample tools
-for
+**Decoding is the solved half.** The processor vendor publishes a reference decoder library with sample tools for
 dumping packets and reconstructing the instruction flow, with a small set of build dependencies; its collection
 documentation covers one operating system's kernel tracing interface and has no Windows chapter at all
-(`observed (source)`). Remember what `references/hardware-tracing.md` establishes: the trace records control
-flow
+(`observed (source)`). Remember what `references/hardware-tracing.md` establishes: the trace records control flow
 and timing, never values, and the decoder needs the exact image that ran.
 
 **That leaves only two routes** (`observed (host)`, the host probe's route row, which reports the processor as
@@ -411,8 +401,7 @@ is documented nowhere; or **a kernel driver of your own**, which means driver si
 virtualisation-based integrity is enforcing, a policy that may refuse it outright.
 
 The documented user-mode capture route for this facility is on **Linux**, through the kernel's performance-event
-interface and its tracing tool, which is why a plan that genuinely needs instruction tracing may legitimately
-end
+interface and its tracing tool, which is why a plan that genuinely needs instruction tracing may legitimately end
 in "this is a different platform". Load `references/hardware-tracing.md` for what the mechanism records, what it
 cannot, and the cost of a capture, and `references/hypervisor-observation.md` with `references/anti-analysis.md`
 for the observation routes that exist when tracing does not.
@@ -423,35 +412,31 @@ The failure this prevents: a route needs a tool, the tool is not installed, and 
 method whose output is then treated as if it answered the same question. The rule is short — **name the missing
 capability exactly, decide whether it is installable, and if it is, install it as part of the task.**
 
-1. **Name the capability, not the product.** "Read the section table of a PE" and "extract an installer's
-   payload without running it" are capabilities; a product name is one way to get one. 2. **Decide the gate.** A
-   **download gate** is closed by fetching the tool; a **licence gate** by a purchase or by changing engines; a
-   **machine gate** (hardware, a privileged session, a second machine, a reboot that policy forbids) by changing
-   the machine or by declaring the route unavailable. 3. **Install it, then prove it produced output.** The
-   installation succeeding is not the capability existing: give the new tool an input and read its answer, as
-   this file's opening rule demands. 4. **Do not substitute.** If the capability stays unavailable, the
-   alternative is the engine that owns the same question at a lower tier, or a written "not available on this
-   host" quoting the probe row and the price. A weaker method reported in the same voice as the missing one is
-   the defect.
+1. **Name the capability, not the product.** "Read the section table of a PE" and "extract an installer's payload
+   without running it" are capabilities; a product name is one way to get one.
+2. **Decide the gate.** A **download gate** is closed by fetching the tool; a **licence gate** by a purchase or by
+   changing engines; a **machine gate** (hardware, a privileged session, a second machine, a reboot that policy
+   forbids) by changing the machine or by declaring the route unavailable.
+3. **Install it, then prove it produced output.** The installation succeeding is not the capability existing: give
+   the new tool an input and read its answer, as this file's opening rule demands.
+4. **Do not substitute.** If the capability stays unavailable, the alternative is the engine that owns the same
+   question at a lower tier, or a written "not available on this host" quoting the probe row and the price. A
+   weaker method reported in the same voice as the missing one is the defect.
 
 **A worked example from this repository's own record** (`observed (record)`,
 `references/installers-and-packaging.md`). An installer of a known builder family had to be unpacked, and the
 route chosen was a purpose-built extractor rather than running the installer — because running it would have
-modified the analysis host and destroyed the isolation the environment gate depends on. The extractor was
-absent,
+modified the analysis host and destroyed the isolation the environment gate depends on. The extractor was absent,
 so it was installed on the spot for that purpose, then used against the sample: an inventory pass that wrote
-nothing, then an extraction measured at 158 listed entries and 155 files totalling 87.6 MB in 9.2 s, including
-the
+nothing, then an extraction measured at 158 listed entries and 155 files totalling 87.6 MB in 9.2 s, including the
 payload that turned out to be the real subject. The extractor's banner claimed support only up to an older
 container revision than the sample used, and the record draws the generalisable lesson: **run the tool and read
-the result, rather than ruling it out from its own documentation.** That is the whole pattern, and the sample
-never
+the result, rather than ruling it out from its own documentation.** That is the whole pattern, and the sample never
 became the toolchain's test subject.
 
 **Two counter-examples, so the pattern is not read as "always install".** HyperDbg is open source and freely
 downloadable and is still not installable as a route on an ordinary locked-down host: its own documentation
-requires the processor vendor's virtualisation extensions, requires driver signature enforcement to be off
-because
+requires the processor vendor's virtualisation extensions, requires driver signature enforcement to be off because
 current builds are unsigned, and is mutually exclusive with virtualisation-based security, since both are
 hypervisors at the same privilege level (`observed (source)`). And IDA Free is free and still cannot be made to
 script: that capability sits behind a licence.
@@ -464,18 +449,13 @@ interpreter, a library, or an SDK. It is GUI-only when the only interface is a w
 for a human. **Binary Ninja's position — that a library beats a batch switch — is a vendor stating the general
 principle**, which is why the engine sections ask about the library before the command line.
 
-**The rule for a GUI-only tool: ask for it.** When the capability the task needs is owned by a GUI-only tool,
-the
+**The rule for a GUI-only tool: ask for it.** When the capability the task needs is owned by a GUI-only tool, the
 correct action is to request that a human run it and report the result — not to replace it with a weaker method
 that can be scripted, because that method's output is then treated as if it answered the same question. The
 concrete failure this prevents: reaching for string extraction or a raw instruction listing because a decompiler
 is interactive, then treating a plausible-looking listing as a recovered structure. The rule in the other
-direction is as important: when the question is "what does this function do at this moment with these
-arguments", the command-line engine answers it unattended; the GUI is for the case where a human is reading.
-
-One nuance the engines above add: an engine whose product is a GUI may still ship a library that does everything
-the GUI does (IDA with `idalib`, Binary Ninja by design, Ghidra through its headless launcher and PyGhidra). The
-question is not "does it have a GUI" but "does the interface I will call exist without one".
+direction is as important: when the question is "what does this function do at this moment with these arguments",
+the command-line engine answers it unattended; the GUI is for the case where a human is reading.
 
 ## Version and bitness alignment
 
@@ -496,42 +476,36 @@ An interactive tool has no stable machine interface. Driving one by keystrokes o
 session whose behaviour depends on focus, timing and whatever dialog happened to appear, and the typical failure
 mode is not an error but an indefinite wait that looks like "still working". Three rules:
 
-1. Use the command-line engine that shares the interactive tool's engine when one exists; that is what it is
-   for, and it accepts a full command list up front. 2. If a tool offers a script file rather than a command
-   string, that file is the interface: write it, pass it, and bound the run with a timeout derived from one
-   measured run rather than an assumed one. 3. Never drive a GUI tool from a script. Ask for it, or use the
-   scriptable tool that owns the same question, and if no such tool exists, report the capability as
-   unavailable-for-unattended-use rather than reporting the answer from a substitute.
-
-Suppressing dialogs is not the same as executing a script, and a switch that does one is frequently assumed to
-do
-the other: when a batch invocation returns having done nothing, check which switch you used before concluding
-the
-tool is broken.
+1. Use the command-line engine that shares the interactive tool's engine when one exists; that is what it is for,
+   and it accepts a full command list up front.
+2. If a tool offers a script file rather than a command string, that file is the interface: write it, pass it, and
+   bound the run with a timeout derived from one measured run rather than an assumed one.
+3. Never drive a GUI tool from a script. Ask for it, or use the scriptable tool that owns the same question, and
+   if no such tool exists, report the capability as unavailable-for-unattended-use rather than reporting the
+   answer from a substitute.
 
 ## Budget rules that apply to every tool in this file
-
 The most common way a long session is lost is not a wrong conclusion. It is a tool returning more than a reader
 can consume, followed by a re-run to "get a smaller answer".
 
 - **A bounded summary over a complete retained record.** Every producer that can emit a large result prints a
   bounded summary and writes the complete record to a path it reports. Read the summary; open the file only for
   the specific question the summary left open. For a tool you did not write, the same discipline applies by
-  redirection: keep the full output in a file, and read a bounded head, a count and an error summary from it. -
-  **Fold a listing before it reaches anything with a context limit.** A raw disassembly listing or a trace is
-  reduced to basic blocks, a call sequence and a histogram **before** it is reported or passed onward: the
-  folded form answers "where did this diverge", the raw form answers nothing a reader can hold. This applies
-  with special force to decompiler and disassembler output, the largest thing any tool here produces. - **Never
-  re-run a producer to shrink its answer.** The second run costs the same as the first and returns no less. A
-  reported form that is too long is a defect in the reporting step, not a reason to run the tool again. -
-  **Shrinking the collection is a different act from shrinking the report.** Reducing a trace's providers,
-  raising a log level's threshold, narrowing a scan's range or filtering to one process changes *what was
-  captured*, and that is legitimate — a different experiment with a stated scope. One engine above charges for
-  the other approach: an analysis run under a held or skipped initial pass is a different analysis. - **Bound
-  every command, and derive the bound from a measurement.** Time the operation once, record it, and derive the
-  deadline from that number. An unbounded call converts a stall into "still working", the one state from which
-  no recovery is possible. The headless engines are where this bites hardest: a batch analysis with no timeout
-  and a log-only output channel looks identical from outside whether it is working or waiting.
+  redirection: keep the full output in a file, and read a bounded head, a count and an error summary from it.
+- **Fold a listing before it reaches anything with a context limit.** A raw disassembly listing or a trace is
+  reduced to basic blocks, a call sequence and a histogram **before** it is reported or passed onward: the folded
+  form answers "where did this diverge", the raw form answers nothing a reader can hold. This applies with special
+  force to decompiler and disassembler output, the largest thing any tool here produces.
+- **Never re-run a producer to shrink its answer.** The second run costs the same as the first and returns no less.
+  A reported form that is too long is a defect in the reporting step, not a reason to run the tool again.
+- **Shrinking the collection is a different act from shrinking the report.** Reducing a trace's providers, raising
+  a log level's threshold, narrowing a scan's range or filtering to one process changes *what was captured*, and
+  that is legitimate — a different experiment with a stated scope. One engine above charges for the other approach:
+  an analysis run under a held or skipped initial pass is a different analysis.
+- **Bound every command, and derive the bound from a measurement.** Time the operation once, record it, and derive
+  the deadline from that number. An unbounded call converts a stall into "still working", the one state from which
+  no recovery is possible. The headless engines are where this bites hardest: a batch analysis with no timeout and
+  a log-only output channel looks identical from outside whether it is working or waiting.
 
 ## Recording the toolchain actually used
 
@@ -539,31 +513,29 @@ A result is usable only if the record says which tool, at which version, with wh
 bookkeeping: **a decoder or an assembler that disagrees about instruction encoding produces a different answer
 from the same bytes**, and the disagreement is invisible in the output, which is well-formed either way.
 
-- **Pin the version, and the channel it came from.** "Ghidra" is not a version; the revision the launcher
-  reports is. For a pip-installed project the installed version is the fact, and three of the solver projects
-  above publish a package years behind their active branch. The repository's own record carries the pattern in
-  miniature: `dotnet.exe` reports file version 8.0.21 while the selected SDK reports 7.0.101 (`observed
-  (record)`). - **Record the exact invocation, including the switches that changed the analysis.** A run with
-  analysis disabled against a full one, a held-initial-analysis load against a complete one, and a read-only
-  pass against a written one are four different experiments; a flag that selects one belongs in the result, not
-  in your memory of it. - **Record which interpreter or runtime actually ran, and what the tool said about
-  itself.** Multiple Python interpreters and managed runtimes coexist on ordinary machines (`observed (host)`)
-  and resolution depends on `PATH` order; where a tool has a version command, run it, and where the only version
-  is a file's version resource, say so, because the two can disagree — the repository's record has a case where
-  a program's `--version` and its file resource disagreed, and the file resource was the empty one. - **Record
-  negative results with their search.** A route measured and found unavailable on a named host with a named
-  probe row is more useful than a route nobody tried. The evidence record grades each row `observed`, `inferred`
-  or `unverified` and names the measurement that would raise it (`observed (record)`,
+- **Pin the version, and the channel it came from.** "Ghidra" is not a version; the revision the launcher reports
+  is. For a pip-installed project the installed version is the fact, and three of the solver projects above publish
+  a package years behind their active branch. The repository's own record carries the pattern in miniature:
+  `dotnet.exe` reports file version 8.0.21 while the selected SDK reports 7.0.101 (`observed (record)`).
+- **Record the exact invocation, including the switches that changed the analysis.** A run with analysis disabled
+  against a full one, a held-initial-analysis load against a complete one, and a read-only pass against a written
+  one are four different experiments; a flag that selects one belongs in the result, not in your memory of it.
+- **Record which interpreter or runtime actually ran, and what the tool said about itself.** Multiple Python
+  interpreters and managed runtimes coexist on ordinary machines (`observed (host)`) and resolution depends on
+  `PATH` order; where a tool has a version command, run it, and where the only version is a file's version
+  resource, say so, because the two can disagree — the repository's record has a case where a program's
+  `--version` and its file resource disagreed, and the file resource was the empty one.
+- **Record negative results with their search.** A route measured and found unavailable on a named host with a
+  named probe row is more useful than a route nobody tried. The evidence record grades each row `observed`,
+  `inferred` or `unverified` and names the measurement that would raise it (`observed (record)`,
   `docs/tool-verification/TOOL-VERDICTS.md` and `references/evidence-summary.md`).
 
 ## When a tool really is absent
 
 Name the capability, name the command that failed, and name the probe that says whether the machine has it, then
 choose the route that the remaining tools support. A missing tool is a finding to report, and reporting it costs
-one line, whereas silently substituting a weaker method costs the entire conclusion that follows from it. The
-two
-probe invocations at the top of this file distinguish "not installed" from "installed where `PATH` does not
-reach"
+one line, whereas silently substituting a weaker method costs the entire conclusion that follows from it. The two
+probe invocations at the top of this file distinguish "not installed" from "installed where `PATH` does not reach"
 and from "needs a restart, elevation or a specific CPU feature".
 
 ## Related material in this skill

@@ -89,8 +89,13 @@ def test_every_capability_row_carries_a_name_and_a_required_list(load_script):
     caps = load_script("capabilities.py")
     for capability_id, spec in caps.CAPABILITIES.items():
         assert spec.get("name"), "%s has no name" % capability_id
-        assert isinstance(spec.get("required"), list) and spec["required"], \
-            "%s requires nothing, which cannot be a measurement" % capability_id
+        required = spec.get("required")
+        assert isinstance(required, list), "%s has no required list" % capability_id
+        # An empty `required` is legitimate when the row's prerequisites are other capabilities:
+        # `hypervisor_observe` needs no atom of its own, it needs the capability below it. What is
+        # not legitimate is a row that names nothing at all, because then no probe can decide it.
+        assert required or spec.get("any_of") or spec.get("depends_on"), \
+            "%s names nothing at all" % capability_id
 
 
 def test_capability_rows_use_only_the_documented_keys(load_script):
@@ -101,17 +106,16 @@ def test_capability_rows_use_only_the_documented_keys(load_script):
 
 
 def test_no_unrecorded_atom_reference_is_outside_the_atom_table(load_script):
-    """Two offenders exist; the assertion is that the set has not grown.
+    """Every name in a `required` or `any_of` list has a row in the atom table.
 
-    The task the suite was written for asks for "every named atom has a row". That is false in the
-    shipped table, so the assertion is the measured extent of the breakage plus a refusal to accept
-    a third. See the module docstring.
+    This was false for two entries: a **capability** id had been written into an atom slot, so the
+    probe answered `atom is not defined` and the branch could never be satisfied -- and one of them,
+    `hypervisor_observe`, was therefore permanently blocked with no next action to print. A slot
+    whose vocabulary is wrong is silent, which is why it is asserted as a property now rather than
+    as the measured extent of the breakage.
     """
     caps = load_script("capabilities.py")
-    measured = untabled_references(caps)
-    assert measured == set(UNTABLED_REFERENCES), (
-        "the set of required/any_of entries with no ATOMS row changed; measured %r"
-        % sorted(measured))
+    assert untabled_references(caps) == set()
 
 
 def test_a_capability_named_where_an_atom_belongs_is_answered_as_undefined(load_script):

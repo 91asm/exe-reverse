@@ -37,25 +37,28 @@ def result_token(text):
 def test_list_prints_every_id_and_name(run_script, load_script):
     caps = load_script("capabilities.py")
     result = run_script("capabilities.py", "--list")
-    assert result.returncode == 0, result.stderr
     for capability_id in caps.CAPABILITIES:
         assert capability_id in result.stdout, capability_id
     assert "%d capabilities." % len(caps.CAPABILITIES) in result.stdout
-    assert result.stdout.strip().endswith("RESULT=capabilities_ok")
+    # The list now carries a real verdict rather than an unconditional one, so the exit code and
+    # the token have to agree with what resolving the same registry reports.
+    token, code = caps.verdict(caps.resolve_all())
+    assert result.returncode == code
+    assert result.stdout.strip().endswith("RESULT=%s" % caps.TOKENS[token])
 
 
-def test_list_claims_ok_without_probing_while_json_resolves_the_same_registry(run_script):
-    """Pinned as a measured deviation: the list is a name table, so its token is unconditional.
+def test_list_and_json_agree_on_the_same_registry(run_script):
+    """Two views of one table must not disagree about it.
 
-    This host has blocked capabilities (every `artifact:` route is blocked by design, since the
-    operator supplies the artifact), so the two runs disagree on purpose.
+    The list view used to print the ok token and exit 0 unconditionally while the JSON view of the
+    same registry exited 3 on this host, because most of the table is blocked here by design --
+    every `artifact:` row waits for an operator to supply one. A report that contradicts another
+    report of the same data is worse than either alone: a reader cannot tell which to believe.
     """
     listed = run_script("capabilities.py", "--list")
     resolved = run_script("capabilities.py", "--json")
-    assert listed.returncode == 0
-    assert result_token(listed.stdout) == "capabilities_ok"
-    assert resolved.returncode == 3
-    assert result_token(resolved.stdout) == BLOCKED_TOKEN
+    assert result_token(listed.stdout) == result_token(resolved.stdout)
+    assert listed.returncode == resolved.returncode
 
 
 def test_json_reports_every_capability_with_its_closure(run_script, load_script):

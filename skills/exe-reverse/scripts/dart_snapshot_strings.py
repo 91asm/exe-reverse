@@ -146,6 +146,7 @@ def recover_strings(data, sec, min_length=6, limit=4000):
     out = []
 
     # one-byte (ASCII) runs
+    ascii_spans = []
     i = base
     while i < end and len(out) < limit:
         if data[i] in PRINTABLE:
@@ -155,14 +156,28 @@ def recover_strings(data, sec, min_length=6, limit=4000):
             if j - i >= min_length:
                 out.append((i, sec['vaddr'] + (i - base),
                             data[i:j].decode('latin-1'), 'one-byte'))
+                ascii_spans.append((i, j))
             i = j
         else:
             i += 1
 
-    # two-byte (UTF-16LE) runs: printable ASCII followed by NUL
+    def inside_ascii(pos):
+        return any(lo <= pos < hi for lo, hi in ascii_spans)
+
+    # two-byte (UTF-16LE) runs. Two properties have to hold at once and neither can be read from
+    # the two bytes alone:
+    #
+    #   * the scan must advance **one byte at a time**. Stepping by two from the section base locks
+    #     the phase to that base, so a run shifted to an odd offset -- which one odd-length literal
+    #     is enough to do -- is never examined and is missed whole.
+    #   * a candidate must not sit **inside a one-byte run**. An ASCII literal of even length ends
+    #     with a printable character followed by its alignment byte, which is exactly the shape of a
+    #     UTF-16 character: without this check the tail of "even_phase_liter" starts a run that reads
+    #     as "rvip_pass", a literal that does not exist, while the real run that follows it is
+    #     skipped as an interior position. Both of those were measured on a synthetic fixture.
     i = base
     while i < end - 1 and len(out) < limit:
-        if data[i] in PRINTABLE and data[i + 1] == 0:
+        if data[i] in PRINTABLE and data[i + 1] == 0 and not inside_ascii(i):
             j = i
             chars = []
             while j < end - 1 and data[j] in PRINTABLE and data[j + 1] == 0:
@@ -172,7 +187,7 @@ def recover_strings(data, sec, min_length=6, limit=4000):
                 out.append((i, sec['vaddr'] + (i - base), ''.join(chars), 'two-byte'))
             i = j
         else:
-            i += 2
+            i += 1
     return out
 
 
@@ -267,7 +282,13 @@ def main():
         if want > len(data):                        # given as a vaddr
             off = elf.vaddr_to_offset(want)
             want = off if off is not None else want
-        literals = [lit for lit in literals if lit[0] <= want < lit[0] + len(lit[2])]
+
+        def byte_length(lit):
+            # A two-byte literal occupies two bytes per character, so `len(text)` covered only the
+            # first half of it and an offset in the second half was reported as a miss.
+            return len(lit[2]) * (2 if lit[3] == 'two-byte' else 1)
+
+        literals = [lit for lit in literals if lit[0] <= want < lit[0] + byte_length(lit)]
 
     observation = None if args.no_observe else pool_observation(data, text)
 
@@ -281,7 +302,11 @@ def main():
 
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=True))
-        return 0
+        # The exit code means the same thing in both output modes. It used to return 0 here and 1
+        # from the text path for the identical run, so a script that asked for JSON could not tell
+        # a filter that matched from one that did not.
+        filtered = bool(args.find or args.at)
+        return 0 if report['matches'] or not filtered else 1
 
     e = report['elf']
     print('%s' % args.image)

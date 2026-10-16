@@ -197,35 +197,37 @@ def test_at_inside_the_code_section_matches_nothing(run_script, synthetic_elf):
     assert reported_count(result.stdout) == 0
 
 
-def test_at_misses_the_second_half_of_a_two_byte_literal(load_script, run_script, synthetic_elf):
-    """Pinned deviation, measured rather than assumed.
+def test_at_finds_every_byte_of_a_two_byte_literal(load_script, run_script, synthetic_elf):
+    """`--at` measures its window in bytes, so **every** byte offset inside the literal matches.
 
-    `--at` keeps a literal when `offset <= at < offset + len(text)`. For a two-byte literal the
-    offsets are bytes and the text is characters, so the window covers the first eight of the
-    sixteen bytes the literal occupies: a real byte offset inside the literal is reported as a miss.
-    The same expression is correct for a one-byte literal, where the two units agree.
+    The window used to be `offset + len(text)`. For a two-byte literal the offsets are bytes and the
+    text is characters, so the window covered only the first half of it and a real byte offset in
+    the second half came back as a miss. Note which byte is which: in UTF-16LE an ASCII character is
+    a printable byte followed by a zero byte, so the last meaningful offset in the literal is the
+    high byte of its final character, which is `0x00` and is a perfectly valid offset to probe.
     """
     entry = synthetic_elf.literal("vip_pass")
     assert entry["encoding"] == "two-byte"
-    inside_but_past_the_window = entry["offset"] + len(entry["text"])
-    inside_the_literal = entry["offset"] + 2 * (len(entry["text"]) - 1)
-    assert entry["offset"] < inside_but_past_the_window < inside_the_literal
+    span = 2 * len(entry["text"])
+    lo = entry["offset"]
+    last_low_byte = lo + span - 2
 
-    missed = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--at",
-                        str(inside_but_past_the_window))
-    assert missed.returncode == 1
-    assert reported_count(missed.stdout) == 0
+    assert synthetic_elf.data[last_low_byte] in range(0x20, 0x7F)
+    assert synthetic_elf.data[lo + span - 1] == 0, "the final byte is the high byte of the character"
 
-    # The bytes really are there: the offset the CLI calls a miss is inside the literal.
-    assert synthetic_elf.data[inside_but_past_the_window] in range(0x20, 0x7F)
+    for probe in (lo, lo + 2, last_low_byte, lo + span - 1):
+        found = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--at", str(probe))
+        assert found.returncode == 0, (probe, found.stdout, found.stderr)
+        assert reported_count(found.stdout) == 1, (probe, found.stdout)
 
+    # The module computes the same window the CLI does.
     recovered = load_script("dart_snapshot_strings.py").recover_strings(
         synthetic_elf.data, {"offset": synthetic_elf.rodata["offset"],
                              "vaddr": synthetic_elf.rodata["vaddr"],
                              "size": synthetic_elf.rodata["size"]})
-    matched = [row for row in recovered
-               if row[0] <= inside_but_past_the_window < row[0] + 2 * len(row[2])]
-    assert [row[2] for row in matched] == ["vip_pass"]
+    matched = [row[2] for row in recovered
+               if row[0] <= lo + span - 1 < row[0] + 2 * len(row[2])]
+    assert matched == ["vip_pass"]
 
 
 def test_at_can_be_combined_with_find(run_script, synthetic_elf):
@@ -270,17 +272,25 @@ def test_json_with_no_observe_reports_no_observation(run_script, synthetic_elf):
     assert payload["literals_recovered"] == 3
 
 
-def test_json_returns_zero_even_when_the_filter_matched_nothing(run_script, synthetic_elf):
-    """Pinned deviation: the text mode returns 1 for a miss, the JSON mode returns 0 for the same
-    filter. A caller that reads only the exit code cannot tell the two apart."""
+def test_json_returns_one_when_the_filter_matched_nothing(run_script, synthetic_elf):
+    """The exit code means the same thing in both output modes.
+
+    It used to be 1 from the text path and 0 from the JSON path for the identical filter, so a
+    caller that asked for JSON could not tell a match from a miss by reading the exit code.
+    """
     text_mode = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--find", "no_such_word")
     json_mode = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--find", "no_such_word",
                            "--json")
     assert text_mode.returncode == 1
-    assert json_mode.returncode == 0
+    assert json_mode.returncode == 1
     payload = json.loads(json_mode.stdout)
     assert payload["matches"] == []
     assert payload["literals_recovered"] == 0
+
+    # An unfiltered run is a listing, not a search, and a listing that finds literals still exits 0.
+    unfiltered = run_script("dart_snapshot_strings.py", synthetic_elf.path, "--json")
+    assert unfiltered.returncode == 0
+    assert json.loads(unfiltered.stdout)["matches"]
 
 
 def test_an_unknown_flag_is_a_usage_error(run_script):

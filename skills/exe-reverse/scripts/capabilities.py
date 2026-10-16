@@ -827,7 +827,7 @@ CAPABILITIES = {
     'dump_capture': {
         'name': 'Capture a process\'s memory',
         'required': ['artifact:sample'],
-        'any_of': ['tool:procdump', 'commandline_debug'],
+        'any_of': ['tool:procdump', 'tool:cdb', 'tool:windbg', 'tool:gdb'],
         'note': 'Needs the rights to read the process. A minidump and a full dump answer '
                 'different questions, and the largest minidump is not the smallest full one.',
     },
@@ -864,7 +864,8 @@ CAPABILITIES = {
     },
     'hypervisor_observe': {
         'name': 'Observe from below the operating system',
-        'required': ['kernel_driver_load'],
+        'required': [],
+        'depends_on': ['kernel_driver_load'],
         'note': 'What an ordinary observer cannot see, and also what can intercept an ordinary '
                 'observer. This repository documents the route and ships no hypervisor.',
     },
@@ -894,16 +895,19 @@ CAPABILITIES = {
 
 
 def _all_atoms():
-    """Every atom id a capability refers to, in a stable order."""
+    """Every atom id a capability refers to, in a stable order.
+
+    Only `required` and `any_of` are read, because those name **atoms**. `depends_on` names
+    *capabilities*, and folding the two together produced a list of identifiers drawn from two
+    different vocabularies -- which is exactly how a capability id ended up in an atom slot, where
+    the probe reports `atom is not defined` and the branch can never be satisfied.
+    """
     seen = []
     for cap in CAPABILITIES.values():
         for key in ('required', 'any_of'):
             for atom in cap.get(key, []):
                 if atom not in seen:
                     seen.append(atom)
-        for dep in cap.get('depends_on', []):
-            if dep not in seen:
-                seen.append(dep)
     return seen
 
 
@@ -1210,6 +1214,10 @@ def human_report(results, verbose=False):
                                  % (spec['est_minutes'], spec.get('basis', 'unverified')))
             for dep, state in r['blocked_deps']:
                 lines.append('        blocked by   : %s (%s)' % (dep, state))
+                # Say where to look next. A row blocked by another capability has no missing atom of
+                # its own, so without this the verbose report names the obstacle and stops -- which
+                # reads as "there is nothing you can do" when the answer is one query away.
+                lines.append('        see          : capabilities.py %s --verbose' % dep)
     return lines
 
 
@@ -1237,8 +1245,16 @@ def main(argv=None):
         for cid, spec in CAPABILITIES.items():
             print('  %-26s %s' % (cid, spec.get('name', '')))
         print('\n%d capabilities.' % len(CAPABILITIES))
-        print('RESULT=%s' % TOKENS['ok'])
-        return EXIT_OK
+        # `--list` prints identifiers, so the verdict beside them has to be a real one. It used to
+        # print the ok token and exit 0 unconditionally, which reported a healthy registry on a host
+        # where most of it is blocked -- the same registry that `--json` reports as blocked. Two
+        # views of one table disagreeing is worse than either view alone.
+        results = resolve_all(probe)
+        v, rc = verdict(results)
+        ok = sum(1 for r in results if r['state'] == 'ok')
+        print('%d ok, %d blocked' % (ok, len(results) - ok))
+        print('RESULT=%s' % TOKENS[v])
+        return rc
 
     if args.capability:
         if args.capability not in CAPABILITIES:

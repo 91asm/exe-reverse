@@ -137,14 +137,15 @@ def test_a_two_byte_literal_reports_byte_offsets_and_character_counts(load_scrip
     assert len(text) * 2 == 16, "sixteen bytes on disk, eight characters reported"
 
 
-def test_a_two_byte_run_can_glue_the_tail_of_one_literal_to_the_next(load_script):
-    """A false positive at a wrong offset, pinned because a caller cannot see through it.
+def test_a_two_byte_run_does_not_glue_the_tail_of_one_literal_to_the_next(load_script):
+    """A run is reported from its own first byte, never from the tail of the literal before it.
 
-    The two-byte scan advances from the section base in steps of two, and it accepts *any* printable
-    byte followed by a NUL -- including the last byte of an ASCII literal and the NUL that
-    terminates it. When a two-byte literal begins right after one, the result is a literal that does
-    not exist, reported at the offset of a different literal. `synthetic_elf` avoids this by placing
-    its two-byte run at a phase boundary; the real fix is a framing rule the reader does not have.
+    This used to be a false positive. The scan accepted *any* printable byte followed by a NUL --
+    which is exactly the shape of the last character of an ASCII literal plus its alignment byte --
+    so a two-byte literal beginning right after one was reported as a literal that does not exist,
+    at an offset inside a different one. Both directions are asserted here, because the cheap fix
+    for the glue error (skip anything preceded by a character-shaped pair) reintroduces the opposite
+    one: the real run then starts with its own bytes looking like an interior position.
     """
     dss = load_script("dart_snapshot_strings.py")
     ascii_part = b"odd_phase_literal\x00"
@@ -153,24 +154,41 @@ def test_a_two_byte_run_can_glue_the_tail_of_one_literal_to_the_next(load_script
     recovered = dss.recover_strings(data, {"offset": 0, "vaddr": 0x1000, "size": len(data)})
     texts = [row[2] for row in recovered]
     assert "odd_phase_literal" in texts
-    assert "lvip_pass" in texts, "the tail of the ASCII literal is glued onto the two-byte literal"
-    assert recovered[-1][0] == len(ascii_part) - 2, \
-        "and the reported offset points into the other literal"
+    assert "vip_pass" in texts, texts
+    assert "lvip_pass" not in texts, "the tail of the ASCII literal was glued onto the next run"
+    assert texts.count("vip_pass") == 1
 
 
-def test_a_two_byte_literal_landing_at_an_odd_offset_is_missed(load_script):
-    """A false negative: the same two-byte literal, one byte later, is not recovered at all.
+def test_a_two_byte_literal_landing_at_an_odd_offset_is_recovered(load_script):
+    """A two-byte run at an odd offset is found, and the run before it does not manufacture one.
 
-    The scan is phase-locked to the section base, so anything that shifts a two-byte run to an odd
-    offset -- which one odd-length literal is enough to do -- hides it completely.
+    Two errors lived here. The scan stepped through the two-byte form from the section base, so a
+    run shifted to an odd offset -- which one odd-length literal is enough to do -- was never
+    examined and was missed whole. Advancing one byte at a time fixes that, and the second half of
+    this test guards the error it introduces: the tail of an even-length one-byte literal is a
+    printable byte followed by alignment, which reads as the start of a two-byte run and yields a
+    literal that does not exist.
     """
     dss = load_script("dart_snapshot_strings.py")
     ascii_part = b"even_phase_liter\x00"
     assert len(ascii_part) % 2 == 1, "the two-byte run needs to start at an odd offset"
     data = ascii_part + "vip_pass".encode("utf-16-le") + b"\x00\x00"
     recovered = dss.recover_strings(data, {"offset": 0, "vaddr": 0x1000, "size": len(data)})
-    assert [row[2] for row in recovered] == ["even_phase_liter"]
-    assert "vip_pass" not in [row[2] for row in recovered]
+    texts = [row[2] for row in recovered]
+    assert "vip_pass" in texts, texts
+    assert "even_phase_liter" in texts, texts
+
+    # No phantom literal: a run is reported once, from its own first byte.
+    assert texts.count("vip_pass") == 1
+    two_byte = [row for row in recovered if row[3] == "two-byte"]
+    assert len(two_byte) == 1, two_byte
+
+    # An even-length one-byte literal before a two-byte run must not start a phantom run.
+    data2 = b"even_phase_lite\x00" + "vip_pass".encode("utf-16-le") + b"\x00\x00"
+    got2 = [row[2] for row in dss.recover_strings(
+        data2, {"offset": 0, "vaddr": 0x1000, "size": len(data2)})]
+    assert "vip_pass" in got2, got2
+    assert "vip_pass"[0] not in [t for t in got2 if t != "vip_pass"], got2
 
 
 def test_min_length_drops_the_shorter_literals(load_script, synthetic_elf):
