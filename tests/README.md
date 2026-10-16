@@ -18,8 +18,13 @@ and "the script was measured doing X on this host".
 | `unit/test_pepatch_patcher.py` | Pattern parsing and matching, the ambiguity refusal, the expect-mismatch refusal, the length-unproven and length-change cases, the resolver's refusals, the re-read verification, and the CLI-level facts that a dry run writes nothing and a real run leaves its input byte-identical. |
 | `unit/test_aob_scan.py` | The verdict boundaries at both sides of each threshold, hit reporting with offsets, RVAs and sections, section filtering, context windows, and every accepted shape of a pattern file. |
 | `unit/test_scan_leaks.py` | Every rule firing on a shaped sample, every exemption class staying silent, the three measured deviations from the exemption list, scan position reporting, and the file walk's skips. |
+| `unit/test_capabilities_registry.py` | The capability table: every atom's kind, basis and probe name, the transitive closure against an independent walk, the dependency graph's acyclicity, `resolve` on missing atoms and on `file:` atoms that are and are not on disk, the declaration parser including the documentation template it must reject, and the `declared` / `mapped` / `unknown` classification. |
+| `unit/test_doctor.py` | The static dependency pass (stdlib, siblings and a third-party name separated without executing the file), `discover_scripts` scanning rather than listing, the per-script table with an unclassified script still counted, and the environment facts with their keys and severity labels. |
+| `unit/test_dart_snapshot_strings.py` | The ELF reader against a generated container, both literal encodings recovered at the offsets the fixture placed them at, the length and limit gates, and the pool counts -- zero on an image carrying neither idiom and non-zero on hand-built bytes carrying each one. |
 | `cli/test_cli_surface.py` | Help and usage exit codes for every script, the documented exit codes for each script's error paths, and the negative case that inspect-only runs write nothing into the working directory. |
 | `cli/test_cli_json.py` | Each script's machine-readable output: keys, values, and the conventions that are not what a reader would assume. |
+| `cli/test_cli_registry_surface.py` | The registry and doctor subprocess contracts: `--list` / `--json` / single-capability exit codes and `RESULT=` tokens, the doctor's three blocks and its 0-versus-3 verdict, and the view flags that print one block only. |
+| `cli/test_cli_dart_snapshot.py` | The snapshot reader's CLI: the refusals and their exit codes, `--find` case-insensitivity and the exit code a miss produces, `--at` by file offset and by virtual address, and the `--json` document. |
 | `integration/test_pipeline_end_to_end.py` | Build, locate, patch, re-read: the patched bytes, the untouched control site, the recomputed checksum, and a control run in which nothing changes. |
 | `integration/test_across_builds.py` | Pattern hit counts compared between two builds, including the case where a patch removes the very byte the pattern was located with. |
 | `run_tests.py` | The one-command entry point; prints the install line and exits 3 when pytest is missing. |
@@ -70,6 +75,16 @@ The builder's `no-virtual-tail` recipe is deliberately not used: with a zero vir
 guard rejects the layout it names, so the recipe exits 1 and writes nothing. `fatalign` covers the
 same property. `cli/test_cli_surface.py` pins that failure so the recipe cannot quietly stay
 broken.
+
+`conftest.build_synthetic_elf` builds a second kind of input, because `dart_snapshot_strings.py`
+reads an ELF shared object rather than a PE and no sample of any kind may be committed: a valid
+ELF64 header, a `.text` of sixteen bytes carrying neither idiom the pool observer counts, a
+`.rodata` holding one one-byte (ASCII) literal and one two-byte (UTF-16LE) literal at known
+offsets, and a section-name string table. It is a container to hold the reader against, not a
+Flutter snapshot: the counts the script's docstring records came from a real 26.8 MB `app.so` and
+cannot be reproduced from a generated file, which is why the counting logic is asserted in both
+directions -- zero on the fixture, non-zero on hand-built bytes -- and the real measurement stays a
+recorded observation.
 
 ## Conventions
 

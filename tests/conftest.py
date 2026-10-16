@@ -176,8 +176,11 @@ ELF_TEXT_VADDR = 0x1000
 ELF_RODATA_VADDR = 0x400000
 
 # (offset within .rodata, vaddr offset, text, encoding). The ASCII run at 0x00 and the UTF-16LE run
-# at 0x1C are the two shapes the reader documents; the NUL pairs between them keep the two-byte
-# scan phase-aligned with the four-byte section base.
+# at 0x1C are the two shapes the reader documents; the NUL padding between them keeps the two-byte
+# run on the phase the scan walks, because that scan advances from the section base in steps of two.
+# That phase dependency is a defect in the reader rather than a property of a snapshot, and it is
+# pinned in unit/test_dart_snapshot_strings.py; the fixture places its literals so the recovery path
+# can be measured at all.
 ELF_LITERALS = (
     (0x00, "premium_license", "one-byte"),
     (0x10, "trial_mode", "one-byte"),

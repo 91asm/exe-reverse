@@ -137,6 +137,42 @@ def test_a_two_byte_literal_reports_byte_offsets_and_character_counts(load_scrip
     assert len(text) * 2 == 16, "sixteen bytes on disk, eight characters reported"
 
 
+def test_a_two_byte_run_can_glue_the_tail_of_one_literal_to_the_next(load_script):
+    """A false positive at a wrong offset, pinned because a caller cannot see through it.
+
+    The two-byte scan advances from the section base in steps of two, and it accepts *any* printable
+    byte followed by a NUL -- including the last byte of an ASCII literal and the NUL that
+    terminates it. When a two-byte literal begins right after one, the result is a literal that does
+    not exist, reported at the offset of a different literal. `synthetic_elf` avoids this by placing
+    its two-byte run at a phase boundary; the real fix is a framing rule the reader does not have.
+    """
+    dss = load_script("dart_snapshot_strings.py")
+    ascii_part = b"odd_phase_literal\x00"
+    assert len(ascii_part) % 2 == 0, "the two-byte run needs to start at an even offset"
+    data = ascii_part + "vip_pass".encode("utf-16-le") + b"\x00\x00"
+    recovered = dss.recover_strings(data, {"offset": 0, "vaddr": 0x1000, "size": len(data)})
+    texts = [row[2] for row in recovered]
+    assert "odd_phase_literal" in texts
+    assert "lvip_pass" in texts, "the tail of the ASCII literal is glued onto the two-byte literal"
+    assert recovered[-1][0] == len(ascii_part) - 2, \
+        "and the reported offset points into the other literal"
+
+
+def test_a_two_byte_literal_landing_at_an_odd_offset_is_missed(load_script):
+    """A false negative: the same two-byte literal, one byte later, is not recovered at all.
+
+    The scan is phase-locked to the section base, so anything that shifts a two-byte run to an odd
+    offset -- which one odd-length literal is enough to do -- hides it completely.
+    """
+    dss = load_script("dart_snapshot_strings.py")
+    ascii_part = b"even_phase_liter\x00"
+    assert len(ascii_part) % 2 == 1, "the two-byte run needs to start at an odd offset"
+    data = ascii_part + "vip_pass".encode("utf-16-le") + b"\x00\x00"
+    recovered = dss.recover_strings(data, {"offset": 0, "vaddr": 0x1000, "size": len(data)})
+    assert [row[2] for row in recovered] == ["even_phase_liter"]
+    assert "vip_pass" not in [row[2] for row in recovered]
+
+
 def test_min_length_drops_the_shorter_literals(load_script, synthetic_elf):
     dss = load_script("dart_snapshot_strings.py")
     rodata = dss.Elf(synthetic_elf.data).section(".rodata")
