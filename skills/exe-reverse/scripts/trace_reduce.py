@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""capability: symbolic_reduce
+r"""capability: symbolic_reduce
 
 Reduce an obfuscated bit-vector expression to a simpler equivalent, and say how far the evidence
 for that goes.
@@ -32,6 +32,26 @@ If no sample disagrees, that is **not** a proof of equality. Sampling refutes; i
 The honest statement is "equivalent on N inputs including the boundaries", and the exit code and the
 last line say exactly that rather than claiming a proof this tool cannot produce.
 
+WITH A SOLVER, THE STATEMENT CHANGES
+------------------------------------
+`--prove PATH` names a solver executable (it is run as a separate process at that explicit path,
+which is what keeps this script importable on a host with nothing installed). The tool emits the
+equivalence question as SMT-LIB2 over bit vectors -- asserting that the two forms **differ** on some
+input -- and hands it over:
+
+  * `unsat` means no such input exists, and the statement upgrades from "equivalent on N inputs" to
+    **equivalent for every input at this width**. That is a proof, and it is labelled as one.
+  * `sat` means the solver's witness distinguishes the forms. The witness is not trusted on arrival:
+    it is re-checked by substitution before being reported, because a model parsed slightly wrong is
+    a counterexample that isn't.
+  * timeout, `unknown`, or a solver that cannot run leave the sampled statement standing alone, and
+    the output says the proof was attempted and not obtained.
+
+One detail of the encoding is deliberate and load-bearing: `evaluate()` masks a shift count to six
+bits, an x86 habit, and the SMT encoding applies the same mask to both forms. A proof must be about
+the same functions the samples ran on; encoding the shift without the mask would have the solver
+prove a cleaner semantics than the one this tool actually evaluates.
+
 Usage
 -----
     python trace_reduce.py "(x | y) + (x & y)"
@@ -40,15 +60,19 @@ Usage
     python trace_reduce.py --file expr.txt
     python trace_reduce.py --list-rules
     python trace_reduce.py "(x & 0xff) ^ (x & 0xff)"
+    python trace_reduce.py "(x ^ y) + 2 * (x & y)" --prove C:\path\to\solver.exe
 
-Exit codes: 0 = reduced and every sample agrees, 1 = a sample disagreed (the reduction is wrong),
-2 = usage error, 3 = the expression could not be parsed. The last line is `RESULT=<token>`.
+Exit codes: 0 = reduced and every sample agrees (and, with `--prove`, proven equivalent), 1 = a
+sample or a solver's witness disagreed, 2 = usage error, 3 = the expression could not be parsed.
+The last line is `RESULT=<token>`.
 """
 
 import argparse
 import json
+import os
 import random
 import re
+import subprocess
 import sys
 
 EXIT_OK = 0
@@ -57,7 +81,7 @@ EXIT_USE = 2
 EXIT_PARSE = 3
 
 TOKENS = {'ok': 'reduce_equivalent_on_samples', 'refuted': 'reduce_refuted',
-          'use': 'usage_error', 'parse': 'parse_error'}
+          'proved': 'reduce_proved', 'use': 'usage_error', 'parse': 'parse_error'}
 
 MASK = {8: 0xFF, 16: 0xFFFF, 32: 0xFFFFFFFF, 64: 0xFFFFFFFFFFFFFFFF}
 
@@ -417,6 +441,98 @@ def verify(original, reduced, mask, count):
     return True, None, checked
 
 
+# ---------------------------------------------------------------- proof (optional, external)
+
+SMT_OPS = {'+': 'bvadd', '-': 'bvsub', '*': 'bvmul', '&': 'bvand', '|': 'bvor',
+           '^': 'bvxor', '<<': 'bvshl', '>>': 'bvlshr'}
+
+
+def smt2_term(node, bits):
+    """One node as an SMT-LIB2 bit-vector term, in the semantics evaluate() actually uses.
+
+    The shift count is masked to six bits on both sides of the equivalence, because that is what
+    evaluate() does and a proof must be about the same functions the samples ran on. Encoding the
+    shift without the mask would have the solver prove a cleaner semantics than the one this tool
+    evaluates, and the proof would not cover the sampling.
+    """
+    if node.kind == 'const':
+        return '#x%0*x' % (bits // 4, node.value)
+    if node.kind == 'var':
+        return node.value
+    if node.kind == 'un':
+        return '(%s %s)' % ('bvnot' if node.op == '~' else 'bvneg',
+                            smt2_term(node.kids[0], bits))
+    a = smt2_term(node.kids[0], bits)
+    b = smt2_term(node.kids[1], bits)
+    if node.op in ('<<', '>>'):
+        b = '(bvand %s #x%0*x)' % (b, bits // 4, 63)
+    return '(%s %s %s)' % (SMT_OPS[node.op], a, b)
+
+
+def smt2_for(original, reduced, bits):
+    """The whole script: declare the variables, assert the two forms differ, ask, show a witness."""
+    lines = ['(set-logic QF_BV)']
+    for name in sorted(variables(original) | variables(reduced)):
+        lines.append('(declare-fun %s () (_ BitVec %d))' % (name, bits))
+    lines.append('(assert (distinct %s %s))'
+                 % (smt2_term(original, bits), smt2_term(reduced, bits)))
+    lines.append('(check-sat)')
+    lines.append('(get-model)')
+    return '\n'.join(lines) + '\n'
+
+
+MODEL_RE = re.compile(
+    r'\(define-fun\s+(\S+)\s*\(\)\s*\(_\s+BitVec\s+\d+\)\s+#x([0-9a-fA-F]+)')
+
+
+def model_env(model_text, mask):
+    """The solver's witness as an environment evaluate() can be re-checked with."""
+    env = {}
+    for name, hexdigits in MODEL_RE.findall(model_text):
+        env[name] = int(hexdigits, 16) & mask
+    return env
+
+
+def prove(original, reduced, mask, bits, solver, timeout):
+    """Ask an external solver whether any input distinguishes the two forms.
+
+    Returns (verdict, info): verdict is 'proved' (no such input exists), 'refuted' (info['env'] is
+    a witness, re-checked by substitution before being believed), or 'no-verdict' with info['reason'].
+    The solver runs as a separate process at an explicit path, which is what keeps this script
+    importable and testable on a host with nothing installed.
+    """
+    script = smt2_for(original, reduced, bits)
+    try:
+        run = subprocess.run([solver, '-smt2', '-in'], input=script,
+                             capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        return 'no-verdict', {'reason': 'the solver path does not exist', 'script': script}
+    except subprocess.TimeoutExpired:
+        return 'no-verdict', {'reason': 'no answer within %d s' % timeout, 'script': script}
+    out = run.stdout.strip()
+    first = out.splitlines()[0].strip() if out else ''
+    if first == 'unsat':
+        return 'proved', {'script': script, 'solver_output': out}
+    if first == 'sat':
+        env = model_env(run.stdout, mask)
+        if not env:
+            return 'no-verdict', {'reason': 'the solver said sat but no witness was readable '
+                                            'from its model', 'script': script,
+                                  'solver_output': out}
+        a = evaluate(original, env, mask)
+        b = evaluate(reduced, env, mask)
+        if a == b:
+            # A witness that does not actually distinguish the forms is not trusted: either the
+            # model was parsed wrong or the solver is playing games, and both mean no proof.
+            return 'no-verdict', {'reason': 'the solver said sat but its witness does not '
+                                            'distinguish the forms', 'script': script,
+                                  'solver_output': out, 'witness': env}
+        return 'refuted', {'env': env, 'original': a, 'reduced': b,
+                           'script': script, 'solver_output': out}
+    return 'no-verdict', {'reason': 'the solver answered %r' % (first or '(nothing)'),
+                          'script': script, 'solver_output': out}
+
+
 # ---------------------------------------------------------------- report
 
 def rule_table():
@@ -445,6 +561,11 @@ def main():
     ap.add_argument('--verbose', action='store_true', help='print every rewrite step')
     ap.add_argument('--list-rules', action='store_true')
     ap.add_argument('--json', action='store_true')
+    ap.add_argument('--prove', metavar='SOLVER',
+                    help='path to an SMT solver executable; with it, equivalence is proven for '
+                         'every input at this width instead of sampled')
+    ap.add_argument('--prove-timeout', type=int, default=30, metavar='SECONDS',
+                    help='give up on the proof after this long (default: 30)')
     args = ap.parse_args()
 
     if args.list_rules:
@@ -481,6 +602,17 @@ def main():
     reduced, steps = reduce_all(tree, mask)
     equal, counter, checked = verify(tree, reduced, mask, args.samples)
 
+    verdict, pinfo = None, None
+    if args.prove:
+        if not os.path.isfile(args.prove):
+            sys.stderr.write('error: --prove needs a solver path; %r is not a file\n' % args.prove)
+            print('RESULT=%s' % TOKENS['use'])
+            return EXIT_USE
+        verdict, pinfo = prove(tree, reduced, mask, args.bits, args.prove, args.prove_timeout)
+        if verdict == 'refuted':
+            equal, counter = False, {'env': pinfo['env'], 'original': pinfo['original'],
+                                     'reduced': pinfo['reduced']}
+
     if args.json:
         print(json.dumps({
             'expression': text, 'bits': args.bits,
@@ -488,9 +620,19 @@ def main():
             'steps': [{'rule': r, 'identity': n, 'from': b, 'to': a} for r, n, b, a in steps],
             'samples_checked': checked, 'equivalent_on_samples': equal,
             'counterexample': counter,
+            'proof': None if verdict is None else {
+                'solver': args.prove, 'verdict': verdict,
+                'reason': pinfo.get('reason'),
+                'witness': pinfo.get('env'),
+                'claim': ('equivalent for every input at this width' if verdict == 'proved' else
+                          'not proven; the sampled statement stands alone'),
+            },
             'evidence': ('a counterexample refutes the reduction' if counter else
                          'sampling refutes, it does not prove: these are the inputs it tried'),
         }, indent=2))
+        if verdict == 'proved':
+            print('RESULT=%s' % TOKENS['proved'])
+            return EXIT_OK
         print('RESULT=%s' % (TOKENS['ok'] if equal else TOKENS['refuted']))
         return EXIT_OK if equal else EXIT_COUNTEREXAMPLE
 
@@ -511,15 +653,33 @@ def main():
         print('checked on %d inputs, including 0, 1, all-ones and the single-bit patterns:'
               % checked)
         print('  the two forms agree on every one of them.')
-        print('  Sampling refutes; it does not prove. What this supports is "equivalent on %d '
-              'inputs",' % checked)
-        print('  not "equivalent" -- for that, a solver and a proof, or the identity itself.')
+        if verdict == 'proved':
+            print('  and proven: the solver was asked for an input that distinguishes the two')
+            print('  forms and answered that none exists. That is equivalence for every input at')
+            print('  %d bits, in the semantics this tool evaluates (shift counts masked to six' % args.bits)
+            print('  bits, on both sides of the question).')
+        elif verdict is not None:
+            print('  a proof was attempted and not obtained (%s).' % pinfo['reason'])
+            print('  Sampling refutes; it does not prove. What this supports is "equivalent on %d' % checked)
+            print('  inputs", not "equivalent".')
+        else:
+            print('  Sampling refutes; it does not prove. What this supports is "equivalent on %d ' % checked)
+            print('  inputs", not "equivalent" -- for that, a solver and a proof, or the identity itself.')
     else:
         print('REFUTED on the input that follows. The reduction is wrong:')
+        if verdict == 'refuted':
+            print('  (found by a complete search, not by sampling)')
         print('  input     : %s' % ', '.join('%s=0x%x' % (k, v) for k, v in counter['env'].items()))
         print('  original  : 0x%x' % counter['original'])
         print('  reduced   : 0x%x' % counter['reduced'])
-    print('\nRESULT=%s' % (TOKENS['ok'] if equal else TOKENS['refuted']))
+    if verdict is not None and verdict not in ('proved', 'refuted'):
+        print()
+        print('proof      : no verdict (%s); nothing above is strengthened by it' % pinfo['reason'])
+    print()
+    if verdict == 'proved':
+        print('RESULT=%s' % TOKENS['proved'])
+        return EXIT_OK
+    print('RESULT=%s' % (TOKENS['ok'] if equal else TOKENS['refuted']))
     return EXIT_OK if equal else EXIT_COUNTEREXAMPLE
 
 
