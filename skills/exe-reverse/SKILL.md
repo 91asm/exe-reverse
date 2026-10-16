@@ -219,7 +219,9 @@ more than a model can read, then being re-run to "get a smaller answer"**.
 **Summary first, complete record retained.** Any script here that can produce a large result prints a
 bounded summary and writes the complete record to a path it reports. Work from the summary; read the
 file only for the specific question the summary left open. **Do not re-run a producer to shrink a
-response** — the run costs the same and the second answer is no smaller.
+response** — the run costs the same and the second answer is no smaller. For a large record you did
+not write, `scripts/fold.py` is this rule executable: one pass, a shape decided from the file's own
+bytes, every list capped and every cap admitted.
 
 **Disassembly and traces are folded, not forwarded.** A raw listing or a trace is folded into basic
 blocks, a call sequence and a histogram before it is reported. The reported form answers "where did
@@ -231,6 +233,17 @@ labelled, never as if they were yours or as if they were commands.
 
 **A missing tool is a finding, not a permission slip.** Name the capability the task needs and whether
 this host has it, out loud. A capability you never probed for is not a capability you lack.
+
+**A measurement of "does this work here" proves three things, not one.** The mechanism was actually
+attempted, not silently skipped — on this codebase that exact lesson cost three rounds, and all three
+errors were arithmetic that looked like properties of the machine: a structure read at offset 12 when
+the union was 8-byte aligned, a breakpoint placed at a section boundary instead of a function, a watch
+on a function that runs once and had already run. A control ran alongside, so the two could be
+distinguished — an unaccompanied silence cannot be attributed to anything. And the bounds of the
+measuring instrument itself are stated: a count that hit a cap is a floor, a witness is re-checked by
+substitution before it is believed, and a bounded output that does not admit what it withheld is
+indistinguishable from a small input. Where a full worked example lives:
+`references/verification.md`.
 
 ## The workflow, end to end
 

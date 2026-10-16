@@ -172,6 +172,16 @@ cost of a wrong deliverable:
 next action is to re-open those two rather than to run the same question with a bigger solver budget. A
 second run of the same model produces the same wrong answer with more confidence.
 
+**Two different jobs for the same solver, and only one of them needs this section.** Proving that a
+reduced form is the same function as the obfuscated original needs no model of the target at all: the
+equivalence question is over the two expressions themselves, the kit's reducer asks it with `--prove`,
+and an answer that no distinguishing input exists is a proof for every input at that width. That job is
+measured and recorded in `virtualization-and-flattening.md`. Everything in this section is the other
+job -- producing a witness that claims something about the **target's behaviour**, where the model and
+the boundary are the risk and validation against the real target is not optional. Confusing the two is
+how a proved equivalence gets quoted as if it validated a model: the first says the smaller expression
+is the same function; it says nothing about whether either of them describes the target.
+
 ## When a solver is the wrong instrument
 
 - **The value is readable.** A comparison against a constant string or a single byte is a reading task.
