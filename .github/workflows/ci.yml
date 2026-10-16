@@ -35,7 +35,7 @@ permissions:
 jobs:
   test:
     name: python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
